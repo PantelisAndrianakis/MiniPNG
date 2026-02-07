@@ -1,0 +1,16 @@
+[package]
+name = "minipng"
+description = "Minify PNG files with imperceptible quality loss."
+authors = ["Pantelis Andrianakis"]
+license = "MIT"
+version = "1.0.0"
+edition = "2024"
+
+[features]
+default = []
+
+[dependencies]
+anyhow = "1.0" # Error handling
+image = "0.23" # Current 0.25 version results in larger binary size (2 MB -> 6.5 MB)
+oxipng = "10.1.0" # PNG compression optimizer
+rayon = "1.8" # Thread pools
