@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use image::{GenericImageView, ImageFormat};
 use oxipng::{optimize_from_memory, Deflater, Options as OxiOptions};
 use crate::utils::time_utils;
-use crate::utils::file_utils::TempFile;
 use crate::utils::crc_utils;
 
 use std::fs;
@@ -10,6 +9,7 @@ use std::io::Cursor;
 use std::path::Path;
 
 use crate::dithering;
+use crate::median;
 
 /// Marker string for identifying files minified by this tool.
 /// Includes null terminator as required by PNG tEXt chunks.
@@ -31,6 +31,9 @@ pub enum DitheringMode
 	/// Ordered (Bayer) dithering - regular pattern, balanced approach.
 	Ordered,
 	
+	/// Median cut color quantization - classic algorithm, excellent palette quality.
+	MedianCut,
+	
 	/// Auto-detect optimal mode based on image characteristics.
 	Auto,
 }
@@ -51,6 +54,7 @@ pub struct ProcessingResult
 pub struct MinificationInfo
 {
 	pub quality: Option<u8>,
+	pub dithering_mode: Option<DitheringMode>,
 	pub lossless: bool,
 	pub reduction_pct: f64,
 	pub timestamp: Option<String>,
@@ -96,10 +100,10 @@ pub fn minify_png(source_path: &Path, target_path: &Path, lossless_only: bool, q
 	}
 	
 	// Apply minification based on mode - quality-first, not size-based.
-	let minified_data = if lossless_only
+	let (minified_data, effective_dithering) = if lossless_only
 	{
 		// Apply lossless minification only.
-		apply_quality_lossless_minification(&source_data)?
+		(apply_quality_lossless_minification(&source_data)?, dithering_mode)
 	}
 	else
 	{
@@ -107,16 +111,8 @@ pub fn minify_png(source_path: &Path, target_path: &Path, lossless_only: bool, q
 		apply_quality_lossy_minification(&source_data, quality, dithering_mode, smooth_radius, denoise)?
 	};
 	
-	// Write the result to a temporary file first.
-	let temp_file = TempFile::new()?;
-	
-	fs::write(temp_file.path(), &minified_data)
-		.map_err(|e| anyhow!("Failed to write to temporary file: {}", e))?;
-	
-	// Get the new file size.
-	let new_size = fs::metadata(temp_file.path())
-		.map_err(|e| anyhow!("Failed to get temporary file metadata: {}", e))?
-		.len();
+	// Get size from in-memory buffer (no disk I/O needed!).
+	let new_size = minified_data.len() as u64;
 	
 	// Only save the result if it's smaller than the original.
 	if new_size < original_size
@@ -125,13 +121,11 @@ pub fn minify_png(source_path: &Path, target_path: &Path, lossless_only: bool, q
 		let reduction_pct = (1.0 - (new_size as f64 / original_size as f64)) * 100.0;
 		
 		// Add marker with minification info before saving.
-		let marked_data = add_minification_marker_with_info(&minified_data, lossless_only, quality, reduction_pct)?;
-		fs::write(temp_file.path(), &marked_data)
-			.map_err(|e| anyhow!("Failed to write marked data: {}", e))?;
+		let marked_data = add_minification_marker_with_info(&minified_data, lossless_only, quality, effective_dithering, reduction_pct)?;
 		
-		// Atomically replace the target file with the temporary file.
-		fs::copy(temp_file.path(), target_path)
-			.map_err(|e| anyhow!("Failed to copy to target file: {}", e))?;
+		// Write directly to target (single disk write!).
+		fs::write(target_path, &marked_data)
+			.map_err(|e| anyhow!("Failed to write to target file: {}", e))?;
 		
 		Ok((ProcessingResult
 		{
@@ -211,13 +205,14 @@ fn is_already_minified(png_data: &[u8]) -> Result<(bool, Option<MinificationInfo
 /// Parse minification info from marker text.
 fn parse_minification_info(marker_data: &[u8]) -> Option<MinificationInfo>
 {
-	// Convert to string, format: "MiniPNG by P. Andrian.\0quality=40,reduction=73.0,timestamp=2026-02-06T20:15:30Z"
+	// Convert to string, format: "MiniPNG by P. Andrian.\0quality=40,dithering=floyd,reduction=73.0,timestamp=2026-02-06T20:15:30Z"
 	let marker_str = std::str::from_utf8(marker_data).ok()?;
 	
 	// Skip the "MiniPNG by P. Andrian.\0" part.
 	let data_part = marker_str.strip_prefix(MARKER_STRING)?;
 	
 	let mut quality = None;
+	let mut dithering_mode = None;
 	let mut lossless = false;
 	let mut reduction_pct = 0.0;
 	let mut timestamp = None;
@@ -231,6 +226,7 @@ fn parse_minification_info(marker_data: &[u8]) -> Option<MinificationInfo>
 			match parts[0]
 			{
 				"quality" => quality = parts[1].parse::<u8>().ok(),
+				"dithering" => dithering_mode = parse_dithering_mode(parts[1]),
 				"lossless" => lossless = parts[1] == "true",
 				"reduction" => reduction_pct = parts[1].parse::<f64>().unwrap_or(0.0),
 				"timestamp" => timestamp = Some(parts[1].to_string()),
@@ -242,10 +238,38 @@ fn parse_minification_info(marker_data: &[u8]) -> Option<MinificationInfo>
 	Some(MinificationInfo
 	{
 		quality,
+		dithering_mode,
 		lossless,
 		reduction_pct,
 		timestamp,
 	})
+}
+
+// Helper function to parse dithering mode from string.
+fn parse_dithering_mode(mode_str: &str) -> Option<DitheringMode>
+{
+	match mode_str
+	{
+		"none" => Some(DitheringMode::None),
+		"ordered" => Some(DitheringMode::Ordered),
+		"floyd" => Some(DitheringMode::FloydSteinberg),
+		"median" => Some(DitheringMode::MedianCut),
+		"auto" => Some(DitheringMode::Auto),
+		_ => None,
+	}
+}
+
+/// Convert DitheringMode to its string representation.
+pub fn dithering_mode_to_string(mode: DitheringMode) -> &'static str
+{
+	match mode
+	{
+		DitheringMode::None => "none",
+		DitheringMode::Ordered => "ordered",
+		DitheringMode::FloydSteinberg => "floyd",
+		DitheringMode::MedianCut => "median",
+		DitheringMode::Auto => "auto",
+	}
 }
 
 /// Applies lossless minification with aggressive settings for maximum minification
@@ -275,7 +299,8 @@ fn apply_quality_lossless_minification(png_data: &[u8]) -> Result<Vec<u8>>
 /// Quality 40 (default) provides good visual quality with aggressive minification (~70-77% reduction).
 /// Quality 50-60 provides very good quality with strong minification (~57-73% reduction).
 /// Quality 70-80 provides excellent quality with moderate minification (~30-60% reduction).
-fn apply_quality_lossy_minification(png_data: &[u8], quality: u8, dithering_mode: DitheringMode, smooth_radius: f32, denoise: bool) -> Result<Vec<u8>>
+/// Returns (minified_data, effective_dithering_mode)
+fn apply_quality_lossy_minification(png_data: &[u8], quality: u8, dithering_mode: DitheringMode, smooth_radius: f32, denoise: bool) -> Result<(Vec<u8>, DitheringMode)>
 {
 	// Validate it's a valid PNG and load it.
 	let img = image::load_from_memory(png_data)
@@ -304,11 +329,11 @@ fn apply_quality_lossy_minification(png_data: &[u8], quality: u8, dithering_mode
 	let minified = optimize_from_memory(&quantized, &options)
 		.map_err(|e| anyhow!("Failed to optimize quantized PNG: {}", e))?;
 	
-	Ok(minified)
+	Ok((minified, effective_dithering))
 }
 
 /// Adds a tEXt chunk marker with minification info.
-fn add_minification_marker_with_info(png_data: &[u8], lossless: bool, quality: u8, reduction_pct: f64) -> Result<Vec<u8>>
+fn add_minification_marker_with_info(png_data: &[u8], lossless: bool, quality: u8, dithering_mode: DitheringMode, reduction_pct: f64) -> Result<Vec<u8>>
 {
 	// Verify PNG signature.
 	if png_data.len() < 8 || &png_data[0..8] != PNG_SIGNATURE
@@ -346,13 +371,16 @@ fn add_minification_marker_with_info(png_data: &[u8], lossless: bool, quality: u
 	// Create our marker chunk with minification info.
 	let timestamp = time_utils::get_iso8601_timestamp();
 	
+	// Get dithering mode name.
+	let dithering_name = dithering_mode_to_string(dithering_mode);
+	
 	let info_str = if lossless
 	{
 		format!("lossless=true,reduction={:.1},timestamp={}", reduction_pct, timestamp)
 	}
 	else
 	{
-		format!("quality={},lossless=false,reduction={:.1},timestamp={}", quality, reduction_pct, timestamp)
+		format!("quality={},dithering={},lossless=false,reduction={:.1},timestamp={}", quality, dithering_name, reduction_pct, timestamp)
 	};
 	
 	let marker_text = format!("{}{}", MARKER_STRING, info_str);
@@ -430,6 +458,13 @@ fn apply_quantization(img: &image::DynamicImage, quality: u8, dithering_mode: Di
 			apply_ordered_dithering(&rgba, width, height, downsampling_factor)
 		},
 		
+		DitheringMode::MedianCut =>
+		{
+			// Median cut color quantization - classic algorithm with excellent palette quality.
+			// Fast and produces high-quality results.
+			apply_median_quantization(&rgba, downsampling_factor)
+		},
+		
 		DitheringMode::Auto =>
 		{
 			// This should have been resolved earlier, but handle it just in case.
@@ -489,16 +524,37 @@ fn apply_darkening(rgba: &mut image::RgbaImage)
 
 /// Apply simple quantization without dithering.
 /// Cleanest for gradients and UI elements, but may show banding.
+/// Uses parallel processing for improved performance.
 fn apply_no_dithering(rgba: &image::RgbaImage, width: u32, height: u32, factor: u8) -> image::RgbaImage
 {
+	use rayon::prelude::*;
+	
 	let mut quantized_img = image::RgbaImage::new(width, height);
 	
-	for (x, y, pixel) in rgba.enumerate_pixels()
+	// Process rows in parallel for better performance.
+	let rows: Vec<_> = (0..height).into_par_iter().map(|y|
 	{
-		let r = quantize_channel(pixel[0] as i16, factor);
-		let g = quantize_channel(pixel[1] as i16, factor);
-		let b = quantize_channel(pixel[2] as i16, factor);
-		quantized_img.put_pixel(x, y, image::Rgba([r, g, b, pixel[3]])); // Keep alpha unchanged.
+		let mut row_pixels = Vec::with_capacity(width as usize);
+		
+		for x in 0..width
+		{
+			let pixel = rgba.get_pixel(x, y);
+			let r = quantize_channel(pixel[0] as i16, factor);
+			let g = quantize_channel(pixel[1] as i16, factor);
+			let b = quantize_channel(pixel[2] as i16, factor);
+			row_pixels.push((x, image::Rgba([r, g, b, pixel[3]])));
+		}
+		
+		(y, row_pixels)
+	}).collect();
+	
+	// Write all rows to the output image.
+	for (y, row_pixels) in rows
+	{
+		for (x, pixel) in row_pixels
+		{
+			quantized_img.put_pixel(x, y, pixel);
+		}
 	}
 	
 	quantized_img
@@ -559,11 +615,20 @@ fn apply_floyd_steinberg_dithering(rgba: &image::RgbaImage, width: u32, height: 
 				0
 			];
 			
-			// Distribute error to neighboring pixels (Floyd-Steinberg pattern).
-			// Pattern adapts based on scan direction:
-			// Forward (L→R):     Reverse (R→L):
-			//         X   7/16           7/16 X
-			//   3/16 5/16 1/16     1/16 5/16 3/16
+			// Distribute error using Floyd-Steinberg dithering.
+			// Current pixel = [X], fractions show error distribution:
+			//
+			//  Left-to-right scan:        Right-to-left scan:
+			//  ┌────────┬────────┐        ┌────────┬────────┐
+			//  │   [X]  │   7/16 │        │   7/16 │   [X]  │
+			//  ├────────┼────────┤        ├────────┼────────┤
+			//  │   3/16 │   5/16 │ 1/16   │ 1/16   │   5/16 │ 3/16
+			//  └────────┴────────┘        └────────┴────────┘
+			//      (row n)                      (row n)
+			//  └─────────────────┘        └─────────────────┘
+			//      (row n+1)                    (row n+1)
+			//
+			
 			if is_forward
 			{
 				// Forward scan (left to right).
@@ -668,8 +733,11 @@ fn apply_floyd_steinberg_dithering(rgba: &image::RgbaImage, width: u32, height: 
 
 /// Apply ordered (Bayer) dithering.
 /// Balanced approach: less noisy than Floyd-Steinberg, better than none for photos.
+/// Uses parallel processing for improved performance.
 fn apply_ordered_dithering(rgba: &image::RgbaImage, width: u32, height: u32, factor: u8) -> image::RgbaImage
 {
+	use rayon::prelude::*;
+	
 	// 4x4 Bayer matrix for ordered dithering.
 	// Centered around zero to avoid brightness bias.
 	const BAYER_MATRIX: [[i16; 4]; 4] =
@@ -682,18 +750,37 @@ fn apply_ordered_dithering(rgba: &image::RgbaImage, width: u32, height: u32, fac
 	
 	let mut result = image::RgbaImage::new(width, height);
 	
-	for (x, y, pixel) in rgba.enumerate_pixels()
+	// Process rows in parallel.
+	let rows: Vec<_> = (0..height).into_par_iter().map(|y|
 	{
-		// Get threshold from Bayer matrix.
-		let threshold = BAYER_MATRIX[y as usize % 4][x as usize % 4];
+		let mut row_pixels = Vec::with_capacity(width as usize);
 		
-		// Scale threshold based on downsampling factor.
-		let threshold_scaled = (threshold * factor as i16) / 32;
+		for x in 0..width
+		{
+			let pixel = rgba.get_pixel(x, y);
+			
+			// Get threshold from Bayer matrix.
+			let threshold = BAYER_MATRIX[y as usize % 4][x as usize % 4];
+			
+			// Scale threshold based on downsampling factor.
+			let threshold_scaled = (threshold * factor as i16) / 32;
+			
+			let r = quantize_channel(pixel[0] as i16 + threshold_scaled, factor);
+			let g = quantize_channel(pixel[1] as i16 + threshold_scaled, factor);
+			let b = quantize_channel(pixel[2] as i16 + threshold_scaled, factor);
+			row_pixels.push((x, image::Rgba([r, g, b, pixel[3]])));
+		}
 		
-		let r = quantize_channel(pixel[0] as i16 + threshold_scaled, factor);
-		let g = quantize_channel(pixel[1] as i16 + threshold_scaled, factor);
-		let b = quantize_channel(pixel[2] as i16 + threshold_scaled, factor);
-		result.put_pixel(x, y, image::Rgba([r, g, b, pixel[3]])); // Keep alpha unchanged.
+		(y, row_pixels)
+	}).collect();
+	
+	// Write all rows to the output image.
+	for (y, row_pixels) in rows
+	{
+		for (x, pixel) in row_pixels
+		{
+			result.put_pixel(x, y, pixel);
+		}
 	}
 	
 	result
@@ -847,4 +934,22 @@ fn apply_median_filter_to_block(source: &image::RgbaImage, dest: &mut image::Rgb
 			}
 		}
 	}
+}
+
+/// Apply median cut color quantization.
+/// Uses the classic median cut algorithm for excellent palette quality.
+fn apply_median_quantization(rgba: &image::RgbaImage, downsampling_factor: u8) -> image::RgbaImage
+{
+	// Calculate max colors based on downsampling factor.
+	// Lower factor = more colors allowed.
+	let max_colors = match downsampling_factor
+	{
+		32 => 128, // Most aggressive.
+		16 => 256, // Balanced.
+		12 => 512, // High quality.
+		_ => 1024, // Maximum quality.
+	};
+	
+	// Use the median module to perform quantization.
+	median::quantize_image_with_median(rgba, max_colors)
 }

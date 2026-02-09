@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
-use std::fs::File;
 
 use crate::minify::{minify_png, ProcessingResult, MinificationInfo};
 
@@ -10,69 +9,6 @@ pub struct PngFile
 {
 	pub source_path: PathBuf,
 	pub target_path: PathBuf,
-}
-
-/// A temporary file that is automatically deleted when dropped.
-///
-/// This struct maintains the open file handle internally to ensure the file
-/// remains valid and locked until this object is dropped. This prevents other
-/// processes from modifying the temporary file while it's in use.
-pub struct TempFile
-{
-	// File handle is intentionally kept open but not directly accessed in code.
-	// This ensures the file exists and remains locked until dropped.
-	// The #[allow(dead_code)] attribute is necessary because while we don't directly read from this field, keeping the handle open is critical for maintaining exclusive access to the temporary file.
-	#[allow(dead_code)]
-	file: File,
-	pub path: PathBuf,
-}
-
-impl TempFile
-{
-	pub fn new() -> Result<Self>
-	{
-		let mut rng: u128 = std::time::SystemTime::now()
-			.duration_since(std::time::UNIX_EPOCH)
-			.map_err(|e| anyhow!("Failed to get system time: {}", e))?
-			.as_nanos();
-		
-		let temp_dir: PathBuf = std::env::temp_dir();
-		
-		// Try multiple times in case of collision.
-		for _ in 0..100
-		{
-			let file_name: String = format!("minipng_temp_{:016x}.tmp", rng % 0xFFFFFFFFFFFFFFFF);
-			let path: PathBuf = temp_dir.join(file_name);
-			
-			match std::fs::OpenOptions::new()
-				.write(true)
-				.create_new(true)
-				.open(&path)
-			{
-				Ok(file) => return Ok(TempFile { file, path }),
-				Err(_) =>
-				{
-					// Try a different name.
-					rng = rng.wrapping_add(1);
-				}
-			}
-		}
-		
-		Err(anyhow!("Failed to create temporary file after multiple attempts"))
-	}
-	
-	pub fn path(&self) -> &Path
-	{
-		&self.path
-	}
-}
-
-impl Drop for TempFile
-{
-	fn drop(&mut self)
-	{
-		let _ = std::fs::remove_file(&self.path);
-	}
 }
 
 /// Recursively find all files in a directory that match a predicate.

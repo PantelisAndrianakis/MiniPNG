@@ -37,6 +37,7 @@ pub struct Args
 	/// none = no dithering (cleanest for gradients, may show banding).
 	/// ordered = Bayer dithering (balanced pattern).
 	/// floyd = Floyd-Steinberg error diffusion (best for photos, can be noisy).
+	/// median = Median cut color quantization (excellent palette quality).
 	pub dithering: String,
 	
 	// 4. Advanced Image Processing Parameters.
@@ -76,7 +77,7 @@ impl Args
 			quality: 40,
 			force: false,
 			skip: false,
-			dithering: "auto".to_string(),
+			dithering: "floyd".to_string(),
 			smooth: 0.0,
 			denoise: false,
 			version: env!("CARGO_PKG_VERSION").to_string(),
@@ -211,7 +212,7 @@ impl Args
 					// Image Quality Parameters.
 					println!("  IMAGE QUALITY:");
 					println!("    -q, --quality <QUALITY>      Quality level (1-100, default: 40)");
-					println!("    -d, --dithering <MODE>       Dithering mode (auto, none, ordered, floyd)");
+					println!("    -d, --dithering <MODE>       Dithering mode (auto, none, ordered, floyd, median)");
 					println!("");
 					// Advanced Image Processing Parameters.
 					println!("  ADVANCED PROCESSING:");
@@ -283,8 +284,8 @@ impl Args
 		// Validate dithering mode.
 		match self.dithering.to_lowercase().as_str()
 		{
-			"auto" | "none" | "ordered" | "floyd" | "floyd-steinberg" => {},
-			_ => return Err(anyhow!("Invalid dithering mode. Use: auto, none, ordered, or floyd")),
+			"auto" | "none" | "ordered" | "floyd" | "floyd-steinberg" | "mediancut" | "median" => {},
+			_ => return Err(anyhow!("Invalid dithering mode. Use: auto, none, ordered, floyd, or median")),
 		}
 		
 		// All validations passed.
@@ -327,10 +328,8 @@ pub fn determine_mode(args: &Args, is_png_file: fn(&Path) -> bool) -> Result<Mod
 		
 		Ok(Mode::Files(png_files))
 	}
-	else
+	else // If no files are specified, use directory mode. Use the specified directory or default to current.
 	{
-		// If no files are specified, use directory mode.
-		// Use the specified directory or default to current.
 		Ok(Mode::Directory(args.dir.clone()))
 	}
 }

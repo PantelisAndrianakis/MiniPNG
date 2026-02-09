@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 mod minify;
 mod dithering;
+mod median;
 mod utils
 {
 	pub mod arg_utils;
@@ -32,7 +33,8 @@ fn main() -> Result<()>
 		"none" => minify::DitheringMode::None,
 		"ordered" => minify::DitheringMode::Ordered,
 		"floyd" | "floyd-steinberg" => minify::DitheringMode::FloydSteinberg,
-		_ => return Err(anyhow!("Invalid dithering mode. Use: auto, none, ordered, or floyd")),
+		"mediancut" | "median" => minify::DitheringMode::MedianCut,
+		_ => return Err(anyhow!("Invalid dithering mode. Use: auto, none, ordered, floyd, or median")),
 	};
 	
 	// Determine the mode of operation.
@@ -48,7 +50,8 @@ fn main() -> Result<()>
 	{
 		println!("  - Directory: {}", dir.display());
 	}
-	let mode_desc = match determine_mode(&args, is_png_file)? {
+	let mode_desc = match determine_mode(&args, is_png_file)?
+	{
 		Mode::Directory(_) => "Directory Mode",
 		Mode::Files(_) => "Specific Files Mode",
 	};
@@ -96,6 +99,7 @@ fn main() -> Result<()>
 			minify::DitheringMode::None => "None (clean gradients, may show banding)",
 			minify::DitheringMode::Ordered => "Ordered/Bayer (balanced pattern)",
 			minify::DitheringMode::FloydSteinberg => "Floyd-Steinberg (best for photos)",
+			minify::DitheringMode::MedianCut => "Median Cut (excellent palette quality)",
 		};
 		println!("  - Dithering: {}", dithering_desc);
 	}
@@ -436,16 +440,6 @@ fn main() -> Result<()>
 					*count += 1;
 					let current = *count;
 					
-					// Show comprehensive previous minification info.
-					let prev_settings = if info.lossless
-					{
-						"Lossless".to_string()
-					}
-					else
-					{
-						format!("Quality {}", info.quality.unwrap_or(0))
-					};
-					
 					// Calculate what the original size was before minification.
 					let current_size = result.original_size;
 					let original_size_before = if info.reduction_pct > 0.0
@@ -459,7 +453,15 @@ fn main() -> Result<()>
 					
 					// Format sizes.
 					println!("[{}/{}] Skipped: {}", current, total_files, file_path_display);
-					println!("    Already minified | Mode: {} | Reduction: {:.1}%", prev_settings, info.reduction_pct);
+					let mode_info = if info.lossless
+					{
+						"Lossless".to_string()
+					}
+					else
+					{
+						format!("Quality {} ({})", info.quality.unwrap_or(0), info.dithering_mode.map_or("no dithering", |m| minify::dithering_mode_to_string(m)))
+					};
+					println!("    Already minified | {} | Reduction: {:.1}%", mode_info, info.reduction_pct);
 					println!("    Original: {} -> Minified: {}", format_bytes(original_size_before), format_bytes(current_size));
 					if let Some(ref ts) = info.timestamp
 					{

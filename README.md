@@ -43,10 +43,11 @@ This tool helps you reduce the file size of your PNG images. It:
 - `-q, --quality <QUALITY>` - Quality level for lossy compression (1-100). Higher = better quality, larger file. Default is 40.
   - Common values: 40 (aggressive - default), 50 (balanced), 60 (high quality), 70 (excellent quality).
 - `-d, --dithering <MODE>` - Dithering mode for lossy compression:
-  - `auto` - Automatic selection based on image analysis (default)
+  - `auto` - Automatic selection based on image analysis
   - `none` - No dithering (cleanest for gradients, may show banding)
   - `ordered` - Bayer dithering (balanced pattern)
   - `floyd` - Floyd-Steinberg error diffusion (best for photos, can be noisy)
+  - `median` - Median cut color quantization (excellent palette quality, fast)
 
 ### Advanced Image Processing Options
 - `-s, --smooth <RADIUS>` - Pre-quantization smoothing radius (0.0-5.0, 0 = off). Applies Gaussian blur before color reduction to smooth gradients.

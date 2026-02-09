@@ -22,7 +22,7 @@ pub struct ImageAnalysis
 }
 
 /// Analyzes an image and recommends the best dithering mode.
-/// Returns the optimal mode from: None, Ordered, or FloydSteinberg.
+/// Returns the optimal mode from: None, Ordered, FloydSteinberg, or MedianCut.
 pub fn recommend_dithering_mode(img: &DynamicImage) -> DitheringMode
 {
 	let analysis = analyze_image(img);
@@ -277,7 +277,7 @@ fn calculate_detail_frequency(rgba: &image::RgbaImage, width: u32, height: u32) 
 }
 
 /// Select optimal dithering mode based on analysis.
-/// Chooses between None, Ordered, and FloydSteinberg.
+/// Chooses between None, Ordered, FloydSteinberg and MedianCut.
 fn select_optimal_mode(analysis: &ImageAnalysis) -> DitheringMode
 {
 	// Thresholds tuned for optimal results.
@@ -285,6 +285,8 @@ fn select_optimal_mode(analysis: &ImageAnalysis) -> DitheringMode
 	const LOW_EDGE_THRESHOLD: f64 = 0.15;
 	const LOW_VARIANCE_THRESHOLD: f64 = 200.0;
 	const LOW_COLOR_DIVERSITY: u32 = 100;
+	const MODERATE_COLOR_DIVERSITY: u32 = 300;
+	const HIGH_COLOR_DIVERSITY: u32 = 500;
 	const HIGH_DETAIL_FREQUENCY: f64 = 0.25;
 	const PHOTO_EDGE_THRESHOLD: f64 = 0.35;
 	
@@ -302,14 +304,21 @@ fn select_optimal_mode(analysis: &ImageAnalysis) -> DitheringMode
 		return DitheringMode::None;
 	}
 	
+	// Many distinct colors but not photo-like -> MedianCut (great for logos, illustrations, UI).
+	// High color diversity with moderate edges suggests distinct color regions rather than smooth gradients.
+	if analysis.color_diversity > MODERATE_COLOR_DIVERSITY  && analysis.color_diversity < HIGH_COLOR_DIVERSITY && analysis.edge_density > LOW_EDGE_THRESHOLD  && analysis.edge_density < PHOTO_EDGE_THRESHOLD && analysis.detail_frequency < HIGH_DETAIL_FREQUENCY
+	{
+		return DitheringMode::MedianCut;
+	}
+	
 	// Photo-like with high detail frequency -> Floyd-Steinberg for best quality.
-	if analysis.detail_frequency > HIGH_DETAIL_FREQUENCY && analysis.edge_density > PHOTO_EDGE_THRESHOLD && analysis.color_diversity > 300
+	if analysis.detail_frequency > HIGH_DETAIL_FREQUENCY && analysis.edge_density > PHOTO_EDGE_THRESHOLD && analysis.color_diversity > MODERATE_COLOR_DIVERSITY
 	{
 		return DitheringMode::FloydSteinberg;
 	}
 	
 	// High complexity photo-like content -> Floyd-Steinberg.
-	if analysis.edge_density > 0.4 && analysis.local_variance > 600.0 && analysis.color_diversity > 500
+	if analysis.edge_density > 0.4 && analysis.local_variance > 600.0 && analysis.color_diversity > HIGH_COLOR_DIVERSITY
 	{
 		return DitheringMode::FloydSteinberg;
 	}

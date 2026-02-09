@@ -45,14 +45,7 @@ fn convert_days_to_date(days_since_epoch: u64) -> (u32, u32, u32)
 	let days_in_month: [u64; 12] =
 	[
 		31,
-		if is_leap_year(year)
-		{
-			29
-		}
-		else
-		{
-			28
-		},
+		if is_leap_year(year) { 29 } else { 28 },
 		31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 	];
 	
