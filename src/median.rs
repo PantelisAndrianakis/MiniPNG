@@ -37,12 +37,12 @@ impl ColorBox
 	/// Create a new color box from a list of colors with frequencies.
 	fn new(colors: Vec<(Color, u32)>) -> Self
 	{
-		let mut min_r = 255u8;
-		let mut max_r = 0u8;
-		let mut min_g = 255u8;
-		let mut max_g = 0u8;
-		let mut min_b = 255u8;
-		let mut max_b = 0u8;
+		let mut min_r: u8 = 255;
+		let mut max_r: u8 = 0;
+		let mut min_g: u8 = 255;
+		let mut max_g: u8 = 0;
+		let mut min_b: u8 = 255;
+		let mut max_b: u8 = 0;
 		
 		for (color, _) in &colors
 		{
@@ -79,7 +79,7 @@ impl ColorBox
 	/// Find the channel with the largest range.
 	fn find_widest_channel(&self) -> usize
 	{
-		let (r_range, g_range, b_range) = self.get_ranges();
+		let (r_range, g_range, b_range): (u8, u8, u8) = self.get_ranges();
 		
 		if r_range >= g_range && r_range >= b_range
 		{
@@ -103,7 +103,7 @@ impl ColorBox
 			return None;
 		}
 		
-		let channel = self.find_widest_channel();
+		let channel: usize = self.find_widest_channel();
 		
 		// Sort by the widest channel.
 		self.colors.sort_by_key(|(c, _)| match channel
@@ -114,8 +114,8 @@ impl ColorBox
 		});
 		
 		// Split at median.
-		let mid = self.colors.len() / 2;
-		let right_colors = self.colors.split_off(mid);
+		let mid: usize = self.colors.len() / 2;
+		let right_colors: Vec<(Color, u32)> = self.colors.split_off(mid);
 		
 		// Update this box's bounds.
 		*self = ColorBox::new(self.colors.clone());
@@ -132,19 +132,19 @@ impl ColorBox
 			return Color::new(0, 0, 0, 255);
 		}
 		
-		let mut sum_r = 0u64;
-		let mut sum_g = 0u64;
-		let mut sum_b = 0u64;
-		let mut total_count = 0u64;
+		let mut sum_r: u64 = 0;
+		let mut sum_g: u64 = 0;
+		let mut sum_b: u64 = 0;
+		let mut total_count: u64 = 0;
 		
 		// Weighted average based on how often each color appears.
 		for (color, count) in &self.colors
 		{
-			let count = *count as u64;
-			sum_r += color.r as u64 * count;
-			sum_g += color.g as u64 * count;
-			sum_b += color.b as u64 * count;
-			total_count += count;
+			let count_u64: u64 = *count as u64;
+			sum_r += color.r as u64 * count_u64;
+			sum_g += color.g as u64 * count_u64;
+			sum_b += color.b as u64 * count_u64;
+			total_count += count_u64;
 		}
 		
 		if total_count == 0
@@ -161,39 +161,45 @@ pub fn quantize_image_with_median(rgba: &RgbaImage, max_colors: usize) -> RgbaIm
 {
 	use rayon::prelude::*;
 	
-	let (width, height) = rgba.dimensions();
+	let (width, height): (u32, u32) = rgba.dimensions();
 	
 	// Collect unique colors (sampling for speed on large images).
 	let mut color_counts: HashMap<Color, u32> = HashMap::new();
 	
 	// Sample every 4th pixel for speed (16x fewer pixels, still excellent coverage).
 	// Median cut is very tolerant of sampling - we just need color variety, not every pixel.
-	let sample_step = 4;
+	let sample_step: usize = 4;
 	for y in (0..height).step_by(sample_step)
 	{
 		for x in (0..width).step_by(sample_step)
 		{
-			let pixel = rgba.get_pixel(x, y);
-			let color = Color::new(pixel[0], pixel[1], pixel[2], pixel[3]);
+			let pixel: &image::Rgba<u8> = rgba.get_pixel(x, y);
+			let color: Color = Color::new(pixel[0], pixel[1], pixel[2], pixel[3]);
 			*color_counts.entry(color).or_insert(0) += 1;
 		}
 	}
 	
 	// Start with all colors in one box (with their frequency counts).
-	let initial_colors: Vec<(Color, u32)> = color_counts.into_iter().collect();
-	let mut boxes = vec![ColorBox::new(initial_colors)];
+	let mut initial_colors: Vec<(Color, u32)> = Vec::new();
+	for (color, count) in color_counts
+	{
+		initial_colors.push((color, count));
+	}
+	
+	let mut boxes: Vec<ColorBox> = Vec::new();
+	boxes.push(ColorBox::new(initial_colors));
 	
 	// Split boxes until we have desired number of colors.
 	while boxes.len() < max_colors
 	{
 		// Find the box with the largest range.
-		let mut largest_idx = 0;
-		let mut largest_range = 0u32;
+		let mut largest_idx: usize = 0;
+		let mut largest_range: u32 = 0;
 		
 		for (i, box_) in boxes.iter().enumerate()
 		{
-			let (r, g, b) = box_.get_ranges();
-			let range = r as u32 + g as u32 + b as u32;
+			let (r, g, b): (u8, u8, u8) = box_.get_ranges();
+			let range: u32 = r as u32 + g as u32 + b as u32;
 			if range > largest_range
 			{
 				largest_range = range;
@@ -213,29 +219,35 @@ pub fn quantize_image_with_median(rgba: &RgbaImage, max_colors: usize) -> RgbaIm
 	}
 	
 	// Extract palette from boxes.
-	let palette: Vec<Color> = boxes.iter().map(|b| b.get_average_color()).collect();
+	let mut palette: Vec<Color> = Vec::new();
+	palette.reserve(boxes.len());
+	
+	for b in &boxes
+	{
+		palette.push(b.get_average_color());
+	}
 	
 	// Create the quantized image using parallel processing with per-row caching.
-	let mut quantized = RgbaImage::new(width, height);
+	let mut quantized: RgbaImage = RgbaImage::new(width, height);
 	
-	let rows: Vec<_> = (0..height).into_par_iter().map(|y|
+	let rows: Vec<(u32, Vec<(u32, image::Rgba<u8>)>)> = (0..height).into_par_iter().map(|y|
 	{
-		let mut row_pixels = Vec::with_capacity(width as usize);
+		let mut row_pixels: Vec<(u32, image::Rgba<u8>)> = Vec::with_capacity(width as usize);
 		let mut color_cache: HashMap<Color, Color> = HashMap::new();
 		
 		for x in 0..width
 		{
-			let pixel = rgba.get_pixel(x, y);
-			let original_color = Color::new(pixel[0], pixel[1], pixel[2], pixel[3]);
+			let pixel: &image::Rgba<u8> = rgba.get_pixel(x, y);
+			let original_color: Color = Color::new(pixel[0], pixel[1], pixel[2], pixel[3]);
 			
 			// Check cache first.
-			let quantized_color = if let Some(&cached) = color_cache.get(&original_color)
+			let quantized_color: Color = if let Some(&cached) = color_cache.get(&original_color)
 			{
 				cached
 			}
 			else // Find closest palette color.
 			{
-				let closest = find_closest_palette_color(&original_color, &palette);
+				let closest: Color = find_closest_palette_color(&original_color, &palette);
 				color_cache.insert(original_color, closest);
 				closest
 			};
@@ -261,12 +273,12 @@ pub fn quantize_image_with_median(rgba: &RgbaImage, max_colors: usize) -> RgbaIm
 /// Find the closest color in a palette.
 fn find_closest_palette_color(color: &Color, palette: &[Color]) -> Color
 {
-	let mut best_color = palette[0];
-	let mut best_distance = u64::MAX;
+	let mut best_color: Color = palette[0];
+	let mut best_distance: u64 = u64::MAX;
 	
 	for &palette_color in palette
 	{
-		let distance = color_distance(color, &palette_color);
+		let distance: u64 = color_distance(color, &palette_color);
 		if distance < best_distance
 		{
 			best_distance = distance;
@@ -285,9 +297,9 @@ fn find_closest_palette_color(color: &Color, palette: &[Color]) -> Color
 /// Calculate squared Euclidean distance between colors.
 fn color_distance(c1: &Color, c2: &Color) -> u64
 {
-	let dr = (c1.r as i32 - c2.r as i32) as i64;
-	let dg = (c1.g as i32 - c2.g as i32) as i64;
-	let db = (c1.b as i32 - c2.b as i32) as i64;
+	let dr: i64 = (c1.r as i32 - c2.r as i32) as i64;
+	let dg: i64 = (c1.g as i32 - c2.g as i32) as i64;
+	let db: i64 = (c1.b as i32 - c2.b as i32) as i64;
 	
 	(dr * dr + dg * dg + db * db) as u64
 }

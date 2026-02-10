@@ -25,15 +25,15 @@ pub struct ImageAnalysis
 /// Returns the optimal mode from: None, Ordered, FloydSteinberg, or MedianCut.
 pub fn recommend_dithering_mode(img: &DynamicImage) -> DitheringMode
 {
-	let analysis = analyze_image(img);
+	let analysis: ImageAnalysis = analyze_image(img);
 	select_optimal_mode(&analysis)
 }
 
 /// Analyze key image characteristics.
 fn analyze_image(img: &DynamicImage) -> ImageAnalysis
 {
-	let rgba = img.to_rgba8();
-	let (width, height) = img.dimensions();
+	let rgba: image::RgbaImage = img.to_rgba8();
+	let (width, height): (u32, u32) = img.dimensions();
 	
 	if width == 0 || height == 0
 	{
@@ -48,19 +48,19 @@ fn analyze_image(img: &DynamicImage) -> ImageAnalysis
 	}
 	
 	// Calculate gradient smoothness.
-	let gradient_smoothness = calculate_gradient_smoothness(&rgba, width, height);
+	let gradient_smoothness: f64 = calculate_gradient_smoothness(&rgba, width, height);
 	
 	// Calculate edge density.
-	let edge_density = calculate_edge_density(&rgba, width, height);
+	let edge_density: f64 = calculate_edge_density(&rgba, width, height);
 	
 	// Calculate color diversity.
-	let color_diversity = calculate_color_diversity(&rgba);
+	let color_diversity: u32 = calculate_color_diversity(&rgba);
 	
 	// Calculate local variance.
-	let local_variance = calculate_local_variance(&rgba, width, height);
+	let local_variance: f64 = calculate_local_variance(&rgba, width, height);
 	
 	// Calculate detail frequency.
-	let detail_frequency = calculate_detail_frequency(&rgba, width, height);
+	let detail_frequency: f64 = calculate_detail_frequency(&rgba, width, height);
 	
 	ImageAnalysis
 	{
@@ -76,8 +76,8 @@ fn analyze_image(img: &DynamicImage) -> ImageAnalysis
 /// Lower values = smoother gradients.
 fn calculate_gradient_smoothness(rgba: &image::RgbaImage, width: u32, height: u32) -> f64
 {
-	let mut total_gradient = 0.0;
-	let mut count = 0;
+	let mut total_gradient: f64 = 0.0;
+	let mut count: u32 = 0;
 	
 	// Sample every 4th pixel for performance.
 	for y in (0..height).step_by(4)
@@ -86,10 +86,10 @@ fn calculate_gradient_smoothness(rgba: &image::RgbaImage, width: u32, height: u3
 		{
 			if x + 1 < width
 			{
-				let p1 = rgba.get_pixel(x, y);
-				let p2 = rgba.get_pixel(x + 1, y);
+				let p1: &image::Rgba<u8> = rgba.get_pixel(x, y);
+				let p2: &image::Rgba<u8> = rgba.get_pixel(x + 1, y);
 				
-				let diff = ((p2[0] as i32 - p1[0] as i32).abs() + (p2[1] as i32 - p1[1] as i32).abs() + (p2[2] as i32 - p1[2] as i32).abs()) as f64;
+				let diff: f64 = ((p2[0] as i32 - p1[0] as i32).abs() + (p2[1] as i32 - p1[1] as i32).abs() + (p2[2] as i32 - p1[2] as i32).abs()) as f64;
 				
 				total_gradient += diff;
 				count += 1;
@@ -111,15 +111,15 @@ fn calculate_gradient_smoothness(rgba: &image::RgbaImage, width: u32, height: u3
 /// Higher values = more detailed/complex image.
 fn calculate_edge_density(rgba: &image::RgbaImage, width: u32, height: u32) -> f64
 {
-	let mut edge_count = 0;
-	let mut total_pixels = 0;
+	let mut edge_count: u32 = 0;
+	let mut total_pixels: u32 = 0;
 	
 	// Sample every 4th pixel for performance.
 	for y in (1..height-1).step_by(4)
 	{
 		for x in (1..width-1).step_by(4)
 		{
-			let gradient = calculate_pixel_gradient(rgba, x, y);
+			let gradient: f64 = calculate_pixel_gradient(rgba, x, y);
 			
 			// Threshold for edge detection.
 			if gradient > 30.0
@@ -145,15 +145,15 @@ fn calculate_pixel_gradient(rgba: &image::RgbaImage, x: u32, y: u32) -> f64
 {
 	let get_brightness = |x: u32, y: u32| -> f64
 	{
-		let p = rgba.get_pixel(x, y);
+		let p: &image::Rgba<u8> = rgba.get_pixel(x, y);
 		
 		// Simple brightness calculation.
 		p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114
 	};
 	
 	// Simplified Sobel kernels.
-	let gx = -get_brightness(x-1, y-1) - 2.0*get_brightness(x-1, y) - get_brightness(x-1, y+1) + get_brightness(x+1, y-1) + 2.0*get_brightness(x+1, y) + get_brightness(x+1, y+1);
-	let gy = -get_brightness(x-1, y-1) - 2.0*get_brightness(x, y-1) - get_brightness(x+1, y-1) + get_brightness(x-1, y+1) + 2.0*get_brightness(x, y+1) + get_brightness(x+1, y+1);
+	let gx: f64 = -get_brightness(x-1, y-1) - 2.0*get_brightness(x-1, y) - get_brightness(x-1, y+1) + get_brightness(x+1, y-1) + 2.0*get_brightness(x+1, y) + get_brightness(x+1, y+1);
+	let gy: f64 = -get_brightness(x-1, y-1) - 2.0*get_brightness(x, y-1) - get_brightness(x+1, y-1) + get_brightness(x-1, y+1) + 2.0*get_brightness(x, y+1) + get_brightness(x+1, y+1);
 	(gx * gx + gy * gy).sqrt()
 }
 
@@ -162,12 +162,12 @@ fn calculate_color_diversity(rgba: &image::RgbaImage) -> u32
 {
 	use std::collections::HashSet;
 	
-	let mut colors = HashSet::new();
+	let mut colors: HashSet<(u8, u8, u8)> = HashSet::new();
 	
 	// Bucket colors to 16 levels per channel for faster comparison.
 	for pixel in rgba.pixels()
 	{
-		let bucketed = (pixel[0] / 16, pixel[1] / 16, pixel[2] / 16);
+		let bucketed: (u8, u8, u8) = (pixel[0] / 16, pixel[1] / 16, pixel[2] / 16);
 		colors.insert(bucketed);
 	}
 	
@@ -178,14 +178,14 @@ fn calculate_color_diversity(rgba: &image::RgbaImage) -> u32
 /// Lower values = more uniform image (gradients, solid colors).
 fn calculate_local_variance(rgba: &image::RgbaImage, width: u32, height: u32) -> f64
 {
-	let mut variances = Vec::new();
+	let mut variances: Vec<f64> = Vec::new();
 	
 	// Analyze 8x8 blocks.
 	for block_y in (0..height).step_by(8)
 	{
 		for block_x in (0..width).step_by(8)
 		{
-			let variance = calculate_block_variance(rgba, block_x, block_y, 8, 8, width, height);
+			let variance: f64 = calculate_block_variance(rgba, block_x, block_y, 8, 8, width, height);
 			variances.push(variance);
 		}
 	}
@@ -203,19 +203,19 @@ fn calculate_local_variance(rgba: &image::RgbaImage, width: u32, height: u32) ->
 /// Calculate variance within a block.
 fn calculate_block_variance(rgba: &image::RgbaImage, start_x: u32, start_y: u32, block_width: u32, block_height: u32, img_width: u32, img_height: u32) -> f64
 {
-	let mut values = Vec::new();
+	let mut values: Vec<f64> = Vec::new();
 	
-	let end_x = (start_x + block_width).min(img_width);
-	let end_y = (start_y + block_height).min(img_height);
+	let end_x: u32 = (start_x + block_width).min(img_width);
+	let end_y: u32 = (start_y + block_height).min(img_height);
 	
 	for y in start_y..end_y
 	{
 		for x in start_x..end_x
 		{
-			let p = rgba.get_pixel(x, y);
-
+			let p: &image::Rgba<u8> = rgba.get_pixel(x, y);
+			
 			// Use brightness as representative value.
-			let brightness = p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114;
+			let brightness: f64 = p[0] as f64 * 0.299 + p[1] as f64 * 0.587 + p[2] as f64 * 0.114;
 			values.push(brightness);
 		}
 	}
@@ -225,8 +225,22 @@ fn calculate_block_variance(rgba: &image::RgbaImage, start_x: u32, start_y: u32,
 		return 0.0;
 	}
 	
-	let mean = values.iter().sum::<f64>() / values.len() as f64;
-	let variance = values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64;
+	// Calculate mean manually.
+	let mut sum: f64 = 0.0;
+	for &v in &values
+	{
+		sum += v;
+	}
+	let mean: f64 = sum / values.len() as f64;
+	
+	// Calculate variance manually.
+	let mut variance_sum: f64 = 0.0;
+	for &v in &values
+	{
+		let diff: f64 = v - mean;
+		variance_sum += diff * diff;
+	}
+	let variance: f64 = variance_sum / values.len() as f64;
 	
 	variance
 }
@@ -235,8 +249,8 @@ fn calculate_block_variance(rgba: &image::RgbaImage, start_x: u32, start_y: u32,
 /// Higher values indicate photo-like content that benefits from Floyd-Steinberg.
 fn calculate_detail_frequency(rgba: &image::RgbaImage, width: u32, height: u32) -> f64
 {
-	let mut high_freq_count = 0;
-	let mut total_samples = 0;
+	let mut high_freq_count: u32 = 0;
+	let mut total_samples: u32 = 0;
 	
 	// Sample every 4th pixel.
 	for y in (2..height-2).step_by(4)
@@ -244,13 +258,13 @@ fn calculate_detail_frequency(rgba: &image::RgbaImage, width: u32, height: u32) 
 		for x in (2..width-2).step_by(4)
 		{
 			// Check for high-frequency detail (rapid changes).
-			let center = rgba.get_pixel(x, y);
-			let neighbors = [rgba.get_pixel(x-1, y), rgba.get_pixel(x+1, y), rgba.get_pixel(x, y-1), rgba.get_pixel(x, y+1)];
+			let center: &image::Rgba<u8> = rgba.get_pixel(x, y);
+			let neighbors: [&image::Rgba<u8>; 4] = [rgba.get_pixel(x-1, y), rgba.get_pixel(x+1, y), rgba.get_pixel(x, y-1), rgba.get_pixel(x, y+1)];
 			
-			let mut changes = 0;
+			let mut changes: u32 = 0;
 			for neighbor in neighbors
 			{
-				let diff = (center[0] as i32 - neighbor[0] as i32).abs() + (center[1] as i32 - neighbor[1] as i32).abs() + (center[2] as i32 - neighbor[2] as i32).abs();
+				let diff: i32 = (center[0] as i32 - neighbor[0] as i32).abs() + (center[1] as i32 - neighbor[1] as i32).abs() + (center[2] as i32 - neighbor[2] as i32).abs();
 				if diff > 20
 				{
 					changes += 1;

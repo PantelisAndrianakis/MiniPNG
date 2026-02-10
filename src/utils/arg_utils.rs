@@ -89,10 +89,14 @@ impl Args
 	/// Parse command line arguments and return an Args struct.
 	pub fn parse() -> Result<Self>
 	{
-		let mut args = Args::new();
+		let mut args: Args = Args::new();
 		
 		// Get all command line arguments.
-		let mut cli_args = env::args().collect::<Vec<_>>();
+		let mut cli_args: Vec<String> = Vec::new();
+		for arg in env::args()
+		{
+			cli_args.push(arg);
+		}
 		
 		// Skip the program name (first argument).
 		if !cli_args.is_empty()
@@ -104,7 +108,7 @@ impl Args
 		let mut i: usize = 0;
 		while i < cli_args.len()
 		{
-			let arg = &cli_args[i];
+			let arg: &String = &cli_args[i];
 			
 			match arg.as_str()
 			{
@@ -146,9 +150,7 @@ impl Args
 					if i + 1 < cli_args.len()
 					{
 						i += 1;
-						let value: u8 = cli_args[i].parse::<u8>().map_err(|_|
-							anyhow!("Invalid quality value: must be an integer between 1 and 100")
-						)?;
+						let value: u8 = cli_args[i].parse::<u8>().map_err(|_| anyhow!("Invalid quality value: must be an integer between 1 and 100"))?;
 						args.quality = value;
 					}
 					else
@@ -175,9 +177,7 @@ impl Args
 					if i + 1 < cli_args.len()
 					{
 						i += 1;
-						let value: f32 = cli_args[i].parse::<f32>().map_err(|_|
-							anyhow!("Invalid smooth value: must be a number between 0.0 and 5.0")
-						)?;
+						let value: f32 = cli_args[i].parse::<f32>().map_err(|_| anyhow!("Invalid smooth value: must be a number between 0.0 and 5.0"))?;
 						args.smooth = value;
 					}
 					else
@@ -256,7 +256,17 @@ impl Args
 	pub fn is_explicitly_set(arg_name: &str) -> bool
 	{
 		let args: Vec<String> = env::args().collect();
-		args.iter().any(|a| a == arg_name)
+		
+		// Check if the argument is present in the command line.
+		for a in &args
+		{
+			if a == arg_name
+			{
+				return true;
+			}
+		}
+		
+		false
 	}
 	
 	/// Validate parameter values and relationships.
@@ -308,7 +318,7 @@ pub fn determine_mode(args: &Args, is_png_file: fn(&Path) -> bool) -> Result<Mod
 	{
 		// Validate each file.
 		let mut png_files: Vec<PathBuf> = Vec::new();
-	
+		
 		for path in &args.files
 		{
 			if path.is_file() && is_png_file(path)
@@ -320,7 +330,7 @@ pub fn determine_mode(args: &Args, is_png_file: fn(&Path) -> bool) -> Result<Mod
 				return Err(anyhow!("Input '{}' is not a PNG file.", path.display()));
 			}
 		}
-	
+		
 		if png_files.is_empty()
 		{
 			return Err(anyhow!("No valid PNG files provided."));

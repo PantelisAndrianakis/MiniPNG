@@ -16,18 +16,17 @@ use utils::arg_utils::{Args, Mode, determine_mode};
 use utils::file_utils::{is_png_file, find_png_files_in_dir, prepare_specific_png_files, process_file};
 use utils::time_utils::format_timestamp;
 
-
 /// Minify PNG files with imperceptible quality loss.
 fn main() -> Result<()>
 {
 	// Parse command line arguments.
-	let args = Args::parse()?;
+	let args: Args = Args::parse()?;
 	
 	// Validate parameters using the centralized validation method.
 	args.validate()?;
 	
 	// Parse dithering mode.
-	let dithering_mode = match args.dithering.to_lowercase().as_str()
+	let dithering_mode: minify::DitheringMode = match args.dithering.to_lowercase().as_str()
 	{
 		"auto" => minify::DitheringMode::Auto,
 		"none" => minify::DitheringMode::None,
@@ -38,7 +37,7 @@ fn main() -> Result<()>
 	};
 	
 	// Determine the mode of operation.
-	let mode = determine_mode(&args, is_png_file)?;
+	let mode: Mode = determine_mode(&args, is_png_file)?;
 	
 	// Print the processing settings with logical grouping.
 	println!("Settings:");
@@ -50,7 +49,7 @@ fn main() -> Result<()>
 	{
 		println!("  - Directory: {}", dir.display());
 	}
-	let mode_desc = match determine_mode(&args, is_png_file)?
+	let mode_desc: &str = match determine_mode(&args, is_png_file)?
 	{
 		Mode::Directory(_) => "Directory Mode",
 		Mode::Files(_) => "Specific Files Mode",
@@ -71,7 +70,7 @@ fn main() -> Result<()>
 		println!("  - Quality: {}", args.quality);
 		
 		// Add quality level description.
-		let quality_desc = match args.quality
+		let quality_desc: &str = match args.quality
 		{
 			1..=40 => "Aggressive minification - smallest files, good quality (DEFAULT)",
 			41..=55 => "Balanced minification - small files, very good quality",
@@ -83,7 +82,7 @@ fn main() -> Result<()>
 		println!("    ({}", quality_desc);
 		
 		// Add downsampling factor info.
-		let downsampling_factor = match args.quality
+		let downsampling_factor: i32 = match args.quality
 		{
 			0..=40 => 32,
 			41..=55 => 16,
@@ -93,7 +92,7 @@ fn main() -> Result<()>
 		println!("     Downsampling: ÷{}, Colors reduced for minification)", downsampling_factor);
 		
 		// Add dithering mode info.
-		let dithering_desc = match dithering_mode
+		let dithering_desc: &str = match dithering_mode
 		{
 			minify::DitheringMode::Auto => "Auto (analyzes image to select best mode)",
 			minify::DitheringMode::None => "None (clean gradients, may show banding)",
@@ -148,7 +147,7 @@ fn main() -> Result<()>
 		println!("  - Reduces color palette through quantization.");
 		println!("  - Applies aggressive PNG optimization.");
 		println!("  - Maintains excellent visual quality.");
-		let expected_reduction = match args.quality
+		let expected_reduction: &str = match args.quality
 		{
 			1..=40 => "70-77%",
 			41..=55 => "63-73%",
@@ -163,7 +162,7 @@ fn main() -> Result<()>
 	println!();
 	
 	// Discover PNG files to process.
-	let (png_files, explicit_files) = match mode
+	let (png_files, explicit_files): (Vec<utils::file_utils::PngFile>, bool) = match mode
 	{
 		Mode::Directory(dir) =>
 		{
@@ -175,7 +174,7 @@ fn main() -> Result<()>
 			{
 				println!("Scanning current directory for PNG files...");
 			}
-
+			
 			(find_png_files_in_dir(dir.as_deref(), args.inplace)?, false)
 		},
 		Mode::Files(files) =>
@@ -201,44 +200,44 @@ fn main() -> Result<()>
 	println!();
 	
 	// Process each file in parallel.
-	let results = Arc::new(Mutex::new(Vec::new()));
-	let errors = Arc::new(Mutex::new(Vec::new()));
+	let results: Arc<Mutex<Vec<minify::ProcessingResult>>> = Arc::new(Mutex::new(Vec::new()));
+	let errors: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
 	
 	println!("Processing files...");
 	
 	// Create a progress counter.
-	let total_files = png_files.len();
-	let processed = Arc::new(Mutex::new(0));
+	let total_files: usize = png_files.len();
+	let processed: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
 	
-	let quality = args.quality;
-	let lossless = args.lossless;
-	let force_reminify = args.force;
-	let skip_without_prompting = args.skip;
-	let smooth_radius = args.smooth;
-	let denoise = args.denoise;
+	let quality: u8 = args.quality;
+	let lossless: bool = args.lossless;
+	let force_reminify: bool = args.force;
+	let skip_without_prompting: bool = args.skip;
+	let smooth_radius: f32 = args.smooth;
+	let denoise: bool = args.denoise;
 	
-	// Check if quality was explicitly set (not default 60).
-	let quality_explicitly_set = Args::is_explicitly_set("--quality") || Args::is_explicitly_set("-q");
+	// Check if quality was explicitly set (not default 40).
+	let quality_explicitly_set: bool = Args::is_explicitly_set("--quality") || Args::is_explicitly_set("-q");
 	
 	// Check if lossless was explicitly set.
-	let lossless_explicitly_set = Args::is_explicitly_set("--lossless");
+	let lossless_explicitly_set: bool = Args::is_explicitly_set("--lossless");
 	
 	// Determine if we should prompt:
 	// 1. NOT if --force or --skip is set
 	// 2. Single file explicitly specified (minipng image.png)
-	// 3. Single file found + quality explicitly set (minipng --quality 45 when one file in directory)
+	// 3. Single file found + quality explicitly set (minipng --quality 40 when one file in directory)
 	// 4. Single file found + lossless explicitly set (minipng --lossless when one file in directory)
-	let is_single_file = total_files == 1;
-	let parameters_explicitly_set = quality_explicitly_set || lossless_explicitly_set;
-	let should_prompt_on_skip = !force_reminify && !skip_without_prompting && is_single_file && (explicit_files || parameters_explicitly_set);
+	let is_single_file: bool = total_files == 1;
+	let parameters_explicitly_set: bool = quality_explicitly_set || lossless_explicitly_set;
+	let should_prompt_on_skip: bool = !force_reminify && !skip_without_prompting && is_single_file && (explicit_files || parameters_explicitly_set);
 	
 	// Process single file separately (non-parallel) to allow prompting or forced re-minification.
 	if should_prompt_on_skip || (force_reminify && is_single_file)
 	{
 		println!("Processing file...");
 		
-		let file = &png_files[0];
-		let file_path_display = file.source_path.display().to_string();
+		let file: &utils::file_utils::PngFile = &png_files[0];
+		let file_path_display: String = file.source_path.display().to_string();
 		
 		// First check if already minified.
 		match process_file(&file.source_path, &file.target_path, lossless, quality, dithering_mode, smooth_radius, denoise, force_reminify)
@@ -251,138 +250,73 @@ fn main() -> Result<()>
 					// File was already minified.
 					if force_reminify
 					{
-						// Force flag set - skip prompting, already re-minified above.
-						let size_reduction_pct = if result.original_size > 0
+						// Force mode - file was re-minified without prompt.
+						print_result_message("Re-minified", &file_path_display, result.original_size, result.new_size);
+					}
+					else
+					{
+						// Prompt mode - ask user what to do.
+						println!("File already minified:");
+						
+						let current_size: u64 = result.original_size;
+						let original_size_before: u64 = if info.reduction_pct > 0.0
 						{
-							(1.0 - (result.new_size as f64 / result.original_size as f64)) * 100.0
+							(current_size as f64 / (1.0 - info.reduction_pct / 100.0)) as u64
 						}
 						else
 						{
-							0.0
+							current_size
 						};
 						
-						if result.new_size < result.original_size
+						let mode_info: String = if info.lossless
 						{
-							println!("Re-minified: {} | {} -> {} ({:.1}% smaller)", file_path_display, format_bytes(result.original_size), format_bytes(result.new_size), size_reduction_pct);
+							"Lossless".to_string()
 						}
 						else
 						{
-							println!("No reduction: {} (file couldn't be minified further)", file_path_display);
+							format!("Quality {} ({})", info.quality.unwrap_or(0), info.dithering_mode.map_or("no dithering", |m| minify::dithering_mode_to_string(m)))
+						};
+						
+						println!("  Mode: {}", mode_info);
+						println!("  Original size: {}", format_bytes(original_size_before));
+						println!("  Current size: {} ({:.1}% reduction)", format_bytes(current_size), info.reduction_pct);
+						if let Some(ref ts) = info.timestamp
+						{
+							println!("  Minified on: {}", format_timestamp(ts));
 						}
 						
-						return Ok(());
-					}
-					
-					// Show previous minification details and prompt.
-					let prev_settings = if info.lossless
-					{
-						"Lossless".to_string()
-					}
-					else
-					{
-						format!("Quality {}", info.quality.unwrap_or(0))
-					};
-					
-					// Calculate original size.
-					let current_size = result.original_size;
-					let original_size_before = if info.reduction_pct > 0.0
-					{
-						(current_size as f64 / (1.0 - info.reduction_pct / 100.0)) as u64
-					}
-					else
-					{
-						current_size
-					};
-					
-					// Format sizes.
-					println!("\nFile already minified:");
-					println!("  Previous mode: {}", prev_settings);
-					println!("  Previous reduction: {:.1}%", info.reduction_pct);
-					println!("  Original: {} -> Minified: {}", format_bytes(original_size_before), format_bytes(current_size));
-					if let Some(ref ts) = info.timestamp
-					{
-						println!("  Minified on: {}", format_timestamp(ts));
-					}
-					
-					// Prompt user.
-					println!("\nCurrent settings:");
-					if lossless
-					{
-						println!("  Mode: Lossless");
-					}
-					else
-					{
-						println!("  Mode: Quality {}", quality);
-					}
-					
-					print!("\nRe-minify with current settings? (y/N): ");
-					use std::io::{self, Write};
-					io::stdout().flush().ok();
-					
-					let stdin = io::stdin();
-					let mut response = String::new();
-					stdin.read_line(&mut response).expect("Failed to read user input");
-					
-					let should_reminify = response.trim().to_lowercase() == "y";
-					
-					if !should_reminify
-					{
-						println!("Skipped.");
-						return Ok(());
-					}
-					
-					println!("Re-minifing...");
-					
-					// Re-minify with force=true to bypass marker check.
-					match process_file(&file.source_path, &file.target_path, lossless, quality, dithering_mode, smooth_radius, denoise, true)
-					{
-						Ok((recomp_result, _)) =>
+						println!("\nRe-minify? [y/N]: ");
+						
+						let mut input: String = String::new();
+						std::io::stdin().read_line(&mut input).unwrap_or_default();
+						let answer: String = input.trim().to_lowercase();
+						
+						if answer == "y" || answer == "yes"
 						{
-							let size_reduction_pct = if recomp_result.original_size > 0
+							// User chose to re-minify.
+							match process_file(&file.source_path, &file.target_path, lossless, quality, dithering_mode, smooth_radius, denoise, true)
 							{
-								(1.0 - (recomp_result.new_size as f64 / recomp_result.original_size as f64)) * 100.0
+								Ok((result, _)) =>
+								{
+									print_result_message("Re-minified", &file_path_display, result.original_size, result.new_size);
+								},
+								Err(err) =>
+								{
+									eprintln!("Error re-minifying {}: {}", file_path_display, err);
+								}
 							}
-							else
-							{
-								0.0
-							};
-							
-							if recomp_result.new_size < recomp_result.original_size
-							{
-								println!("Re-minified: {} | {} -> {} ({:.1}% smaller)", file_path_display, format_bytes(recomp_result.original_size), format_bytes(recomp_result.new_size), size_reduction_pct);
-							}
-							else
-							{
-								println!("No reduction: {} (file couldn't be minified further)", file_path_display);
-							}
-						},
-						Err(err) =>
+						}
+						else
 						{
-							eprintln!("Error re-minifing {}: {}", file_path_display, err);
+							println!("Skipped.");
 						}
 					}
 					
 					return Ok(());
 				}
 				
-				// File was not previously minified - show normal minification result.
-				let size_reduction_pct = if result.original_size > 0
-				{
-					(1.0 - (result.new_size as f64 / result.original_size as f64)) * 100.0
-				}
-				else
-				{
-					0.0
-				};
-				
-				if result.new_size < result.original_size
-				{
-					println!("Minified: {} | {} -> {} ({:.1}% smaller)", file_path_display, format_bytes(result.original_size), format_bytes(result.new_size), size_reduction_pct);
-				}
-				else
-				{
-					println!("No reduction: {} (file couldn't be minified further)", file_path_display);
-				}
+				// File was not previously minified.
+				print_result_message("Minified", &file_path_display, result.original_size, result.new_size);
 			},
 			Err(err) =>
 			{
@@ -396,7 +330,7 @@ fn main() -> Result<()>
 	// Batch mode: process in parallel with auto-skip (unless --force is set).
 	png_files.into_par_iter().for_each(|file|
 	{
-		let file_path_display = file.source_path.display().to_string();
+		let file_path_display: String = file.source_path.display().to_string();
 		
 		match process_file(&file.source_path, &file.target_path, lossless, quality, dithering_mode, smooth_radius, denoise, force_reminify)
 		{
@@ -409,18 +343,11 @@ fn main() -> Result<()>
 					if force_reminify
 					{
 						// Force mode - file was already re-minified, show result.
-						let size_reduction_pct = if result.original_size > 0
-						{
-							(1.0 - (result.new_size as f64 / result.original_size as f64)) * 100.0
-						}
-						else
-						{
-							0.0
-						};
+						let size_reduction_pct: f64 = calculate_reduction_pct(result.original_size, result.new_size);
 						
-						let mut count = processed.lock().expect("Processed counter mutex poisoned");
+						let mut count: std::sync::MutexGuard<usize> = processed.lock().expect("Processed counter mutex poisoned");
 						*count += 1;
-						let current = *count;
+						let current: usize = *count;
 						
 						if result.new_size < result.original_size
 						{
@@ -436,13 +363,13 @@ fn main() -> Result<()>
 					}
 					
 					// Auto-skip mode (batch or --skip flag).
-					let mut count = processed.lock().expect("Processed counter mutex poisoned");
+					let mut count: std::sync::MutexGuard<usize> = processed.lock().expect("Processed counter mutex poisoned");
 					*count += 1;
-					let current = *count;
+					let current: usize = *count;
 					
 					// Calculate what the original size was before minification.
-					let current_size = result.original_size;
-					let original_size_before = if info.reduction_pct > 0.0
+					let current_size: u64 = result.original_size;
+					let original_size_before: u64 = if info.reduction_pct > 0.0
 					{
 						(current_size as f64 / (1.0 - info.reduction_pct / 100.0)) as u64
 					}
@@ -453,7 +380,7 @@ fn main() -> Result<()>
 					
 					// Format sizes.
 					println!("[{}/{}] Skipped: {}", current, total_files, file_path_display);
-					let mode_info = if info.lossless
+					let mode_info: String = if info.lossless
 					{
 						"Lossless".to_string()
 					}
@@ -474,22 +401,12 @@ fn main() -> Result<()>
 				
 				// File was not previously minified, or user chose to re-minify.
 				// Calculate the size reduction percentage.
-				let size_reduction_pct = if result.original_size > 0
-				{
-					(1.0 - (result.new_size as f64 / result.original_size as f64)) * 100.0
-				}
-				else
-				{
-					0.0
-				};
+				let size_reduction_pct: f64 = calculate_reduction_pct(result.original_size, result.new_size);
 				
 				// Update the progress counter.
-				let mut count = processed.lock().expect("Processed counter mutex poisoned");
+				let mut count: std::sync::MutexGuard<usize> = processed.lock().expect("Processed counter mutex poisoned");
 				*count += 1;
-				let current = *count;
-				
-				// Format sizes for display.
-
+				let current: usize = *count;
 				
 				// Show detailed progress.
 				if result.original_size == result.new_size && prev_info.is_none()
@@ -512,15 +429,9 @@ fn main() -> Result<()>
 	});
 	
 	// Convert back to a regular Vec.
-	let results = Arc::try_unwrap(results)
-		.unwrap_or_else(|_| panic!("Failed to unwrap Arc"))
-		.into_inner()
-		.expect("Mutex poisoned");
+	let results: Vec<minify::ProcessingResult> = Arc::try_unwrap(results).unwrap_or_else(|_| panic!("Failed to unwrap Arc")).into_inner().expect("Mutex poisoned");
 	
-	let errors = Arc::try_unwrap(errors)
-		.unwrap_or_else(|_| panic!("Failed to unwrap Arc"))
-		.into_inner()
-		.expect("Mutex poisoned");
+	let errors: Vec<(String, String)> = Arc::try_unwrap(errors).unwrap_or_else(|_| panic!("Failed to unwrap Arc")).into_inner().expect("Mutex poisoned");
 	
 	// Print summary.
 	println!("\n========================================");
@@ -541,16 +452,36 @@ fn main() -> Result<()>
 	if !results.is_empty()
 	{
 		// Count skipped vs minified files.
-		let minified_count = results.iter().filter(|r| r.new_size < r.original_size).count();
-		let skipped_count = results.iter().filter(|r| r.new_size == r.original_size).count();
+		let mut minified_count: usize = 0;
+		let mut skipped_count: usize = 0;
+		
+		for r in &results
+		{
+			if r.new_size < r.original_size
+			{
+				minified_count += 1;
+			}
+			if r.new_size == r.original_size
+			{
+				skipped_count += 1;
+			}
+		}
 		
 		println!("\nFiles minified: {}", minified_count);
 		println!("Files skipped (already minified): {}", skipped_count);
 		
-		let total_original_size: u64 = results.iter().map(|r| r.original_size).sum();
-		let total_new_size: u64 = results.iter().map(|r| r.new_size).sum();
-		let total_saved = total_original_size.saturating_sub(total_new_size);
-		let total_saved_pct = if total_original_size > 0
+		// Calculate total sizes.
+		let mut total_original_size: u64 = 0;
+		let mut total_new_size: u64 = 0;
+		
+		for r in &results
+		{
+			total_original_size += r.original_size;
+			total_new_size += r.new_size;
+		}
+		
+		let total_saved: u64 = total_original_size.saturating_sub(total_new_size);
+		let total_saved_pct: f64 = if total_original_size > 0
 		{
 			(total_saved as f64 / total_original_size as f64) * 100.0
 		}
@@ -586,22 +517,19 @@ fn main() -> Result<()>
 		if minified_count > 0
 		{
 			// Calculate average compression for files that were actually minified.
-			let minified_original: u64 = results.iter()
-				.filter(|r| r.new_size < r.original_size)
-				.map(|r| r.original_size)
-				.sum();
-			let minified_new: u64 = results.iter()
-				.filter(|r| r.new_size < r.original_size)
-				.map(|r| r.new_size)
-				.sum();
-			let avg_compression = if minified_original > 0
+			let mut minified_original: u64 = 0;
+			let mut minified_new: u64 = 0;
+			
+			for r in &results
 			{
-				(1.0 - (minified_new as f64 / minified_original as f64)) * 100.0
+				if r.new_size < r.original_size
+				{
+					minified_original += r.original_size;
+					minified_new += r.new_size;
+				}
 			}
-			else
-			{
-				0.0
-			};
+			
+			let avg_compression: f64 = calculate_reduction_pct(minified_original, minified_new);
 			println!("Average compression (minified files only): {:.1}%", avg_compression);
 		}
 		
@@ -625,5 +553,32 @@ fn format_bytes(size: u64) -> String
 	else
 	{
 		format!("{:.2} MB", size as f64 / (1024.0 * 1024.0))
+	}
+}
+
+/// Calculate size reduction percentage.
+fn calculate_reduction_pct(original_size: u64, new_size: u64) -> f64
+{
+	if original_size > 0
+	{
+		(1.0 - (new_size as f64 / original_size as f64)) * 100.0
+	}
+	else
+	{
+		0.0
+	}
+}
+
+/// Print minification result with appropriate message.
+fn print_result_message(prefix: &str, file_path: &str, original_size: u64, new_size: u64)
+{
+	if new_size < original_size
+	{
+		let reduction_pct: f64 = calculate_reduction_pct(original_size, new_size);
+		println!("{}: {} | {} -> {} ({:.1}% smaller)", prefix, file_path, format_bytes(original_size), format_bytes(new_size), reduction_pct);
+	}
+	else
+	{
+		println!("{}: {} (file couldn't be minified further)", prefix, file_path);
 	}
 }

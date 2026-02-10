@@ -2,8 +2,7 @@
 pub fn get_iso8601_timestamp() -> String
 {
 	let now: std::time::SystemTime = std::time::SystemTime::now();
-	let datetime: std::time::Duration = now.duration_since(std::time::UNIX_EPOCH)
-		.unwrap_or_default();
+	let datetime: std::time::Duration = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
 	let secs: u64 = datetime.as_secs();
 	
 	// Convert to UTC datetime components manually.
@@ -36,7 +35,7 @@ fn convert_days_to_date(days_since_epoch: u64) -> (u32, u32, u32)
 		{
 			break;
 		}
-
+		
 		days_remaining -= days_in_year;
 		year += 1;
 	}
@@ -57,7 +56,7 @@ fn convert_days_to_date(days_since_epoch: u64) -> (u32, u32, u32)
 			month = idx + 1;
 			break;
 		}
-
+		
 		days_remaining -= days;
 	}
 	
@@ -83,8 +82,23 @@ pub fn format_timestamp(iso_timestamp: &str) -> String
 		if let Some(time_part) = iso_timestamp.split('T').nth(1)
 		{
 			let time: &str = time_part.trim_end_matches('Z');
-			let hm: String = time.split(':').take(2).collect::<Vec<_>>().join(":");
-			return format!("{} at {}", dt_part, hm);
+			
+			// Extract hour and minute components manually.
+			let mut parts: Vec<&str> = Vec::new();
+			let mut count: usize = 0;
+			for part in time.split(':')
+			{
+				if count < 2
+				{
+					parts.push(part);
+					count += 1;
+				}
+			}
+			
+			if parts.len() == 2
+			{
+				return format!("{} at {}:{}", dt_part, parts[0], parts[1]);
+			}
 		}
 	}
 	iso_timestamp.to_string()

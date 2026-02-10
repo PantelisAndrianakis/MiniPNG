@@ -1,188 +1,876 @@
 # Coding Style Guide
 
-This document describes the coding conventions for this project.
+This document describes the Rust-specific coding conventions for this project.
 
-## Core Principles
-
-- **Clarity over cleverness**: Code should be immediately understandable.
-- **Consistent formatting**: Use the same patterns throughout the codebase.
-- **Explicit over implicit**: Prefer explicit type annotations and error handling.
-- **Simplicity over forced symmetry**: Don't force vertical alignment when a simple line works fine.
-- **Allman style**: Opening braces on new lines for visual symmetry and easy scanning.
-- **Performance-conscious**: Write efficient code but prioritize readability first.
+**⚠️ RUST PHILOSOPHY:** We use Rust for systems programming, not functional programming. Enums over traits, pattern matching over chains, explicitness over cleverness.
 
 ---
 
-## Formatting
+## Core Principles
+
+These are the core principles that define how we write code.
+
+### 1. TYPE INFERENCE - CONTROLLED USE
+
+Type inference is **tightly controlled** but not forbidden.
+
+**Core Principle:** Code must be understandable without IDE assistance. The reader is more important than the writer.
+
+**Allowed - Type is obvious from right-hand side:**
+```rust
+// ALLOWED - Constructor/initializer visible.
+let buffer = Vec::<u8>::new();
+let players = Vec::<Player>::with_capacity(100);
+
+// ALLOWED - Generic type parameters make intent clear.
+let map = HashMap::<String, Player>::new();
+```
+
+**Forbidden - Meaning is hidden:**
+```rust
+// WRONG - Return type unclear.
+let result = calculate_value(x, y, z);
+let data = get_data();
+
+// CORRECT - Explicit types are self-documenting.
+let result: i32 = calculate_value(x, y, z);
+let data: Vec<u8> = get_data();
+```
+
+**Rule:** If understanding the type requires jumping to a definition, inference is forbidden.
+
+**Why?** Code must be understandable without IDE assistance. The reader is more important than the writer.
+
+### 2. SINGLE-LINE CODE - NO WRAPPING
+
+**Code must fit in the reader's working memory. If it does not fit on one line, it does not fit in the head either.**
+
+Control flow, conditions, and signatures must stay on single lines. This enforces **locality of understanding**: all required information must be visible in one visual frame.
+
+```rust
+// GOOD - all parameters visible, even if line is long.
+fn process_data(source_path: &Path, target_path: &Path, validate: bool, quality: u8, mode: ProcessingMode) -> Result<()>
+{
+	// You can see everything. No hidden coupling. No indirection.
+}
+
+// WRONG - wrapping hides complexity.
+fn process_data(
+	source_path: &Path,
+	target_path: &Path,
+	validate: bool
+) -> Result<()>
+{
+	// Now you have to scan vertically. Context is distributed.
+}
+
+// ALSO WRONG - abstraction hides parameters.
+struct ProcessingConfig { /* ... */ }
+fn process_data(config: &ProcessingConfig) -> Result<()>
+{
+	// Now you can't see what the function needs.
+	// Coupling is hidden. Debugging is harder.
+}
+
+// CORRECT - condition visible.
+if cursor[1] == '!' && cursor[2] == '[' && cursor[3] == 'C' && cursor[4] == 'D'
+{
+	handle_cdata();
+}
+```
+
+**Why single-line?**
+- **Visibility over abstraction** - You can see all parameters/conditions directly. No indirection. No hidden coupling.
+- Your brain has ~7±2 working memory slots. Single-line keeps everything in one frame.
+- Wrapping distributes complexity vertically - makes you scan and reconstruct context
+- Creating parameter structs to "fix" long lines makes things WORSE: hidden coupling, loss of transparency, harder debugging
+- A long single line is honest. It shows the real complexity. That's good.
+
+**Don't wrap. Don't hide. If it's long, it's long. That's the truth.**
+
+**Exception - Error handling chains may wrap when linear:**
+```rust
+// Allowed - error chain is linear and obvious.
+let data: Vec<u8> = fs::read(path)
+	.map_err(|e| anyhow!("Failed to read: {}", e))?;
+```
+
+### 3. ALLMAN BRACES - ALWAYS ON NEW LINE
+Opening braces `{` ALWAYS go on a new line. No exceptions (except single-line closures).
+
+```rust
+// WRONG.
+if condition {
+	do_something();
+}
+
+// CORRECT.
+if condition
+{
+	do_something();
+}
+```
+
+**Why?** Visual symmetry makes code easier to scan and spot errors.
+
+### 4. TABS FOR INDENTATION - NOT SPACES
+Use tabs, period. Configure your editor properly.
+
+Why? Because a single tab character is the true, unambiguous representation of a single indentation level. Spaces are a visual approximation; tabs are the logical unit.
+
+### 5. COMPLETE SENTENCES IN COMMENTS
+Comments start with capital letter, end with period.
+
+```rust
+// WRONG.
+// calculate average value
+
+// CORRECT.
+// Calculate the average value.
+```
+
+**Why?** Professional code looks professional. We're not writing text messages.
+
+---
+
+## Rust-Specific Alignment Rules
+
+**⚠️ CRITICAL:** These rules ensure Rust is used as a systems language, not a functional language.
+
+### Prefer Enums With Data Over Traits
+
+Use enums with associated data instead of inheritance or trait objects.
+
+```rust
+// CORRECT - Enum with data.
+enum Packet
+{
+	Login(LoginData),
+	Move(MoveData),
+	Chat(String),
+}
+
+fn handle_packet(packet: Packet)
+{
+	match packet
+	{
+		Packet::Login(data) => process_login(data),
+		Packet::Move(data) => process_move(data),
+		Packet::Chat(msg) => process_chat(msg),
+	}
+}
+
+// WRONG - Trait objects and dynamic dispatch.
+trait Packet
+{
+	fn process(&self);
+}
+
+fn handle_packet(packet: &dyn Packet) // Forbidden in hot paths.
+{
+	packet.process();
+}
+```
+
+This replaces:
+- Polymorphism → Static enum matching
+- Virtual dispatch → Direct branching
+- Downcasting → Pattern matching
+- Heap allocation → Stack allocation
+
+### Prefer Pattern Matching Over If Chains
+
+Use `match` for 3+ comparisons instead of `if/else` chains.
+
+```rust
+// CORRECT - Pattern matching.
+let status: &str = match priority
+{
+	1..=3 => "High priority",
+	4..=7 => "Medium priority",
+	8..=10 => "Low priority",
+	_ => "Custom priority",
+};
+
+// WRONG - If chain for multiple cases.
+let status: &str = if priority >= 1 && priority <= 3
+{
+	"High priority"
+}
+else if priority >= 4 && priority <= 7
+{
+	"Medium priority"
+}
+else if priority >= 8 && priority <= 10
+{
+	"Low priority"
+}
+else
+{
+	"Custom priority"
+};
+```
+
+### Iterators: Traversal Only - No Pipelines
+
+Iterators are allowed only for simple traversal, not for chained pipelines.
+
+**Allowed - Simple traversal:**
+```rust
+for file in files.iter()
+{
+	process(file);
+}
+
+for (index, value) in data.iter().enumerate()
+{
+	println!("{}: {}", index, value);
+}
+```
+
+**Forbidden - Chained iterator pipelines:**
+```rust
+// WRONG - Hides control flow, allocations, and cost.
+let results: Vec<_> = files
+	.iter()
+	.filter(|f| f.size > 1000)
+	.map(|f| process(f))
+	.collect();
+```
+
+**Correct alternative - Explicit loops:**
+```rust
+// CORRECT - Control flow and allocations are visible.
+let mut results: Vec<ProcessedFile> = Vec::new();
+results.reserve(files.len());
+
+for file in files.iter()
+{
+	if file.size > 1000
+	{
+		let processed: ProcessedFile = process(file);
+		results.push(processed);
+	}
+}
+```
+
+### Small Zero-Cost Combinators Are Allowed
+
+Pure, obvious helpers that don't hide semantics are allowed.
+
+```rust
+// Allowed - obvious, zero-cost.
+let size: usize = data.len().max(1);
+let value: i32 = option.unwrap_or(default);
+let clamped: i32 = value.clamp(min, max);
+```
+
+### Avoid Trait-Heavy Designs
+
+Trait objects and dynamic dispatch are forbidden in hot paths.
+
+Use traits only when:
+- Modeling true external polymorphism (e.g., plugin systems).
+- Not performance-critical (cold code).
+- Behavior cannot be expressed with enums.
+
+```rust
+// CORRECT - Enum for known variants.
+enum Storage
+{
+	File(FileStorage),
+	Memory(MemoryStorage),
+	Network(NetworkStorage),
+}
+
+// WRONG - Trait object in hot path.
+fn process(storage: &dyn Storage) // Forbidden if hot.
+{
+	storage.read();
+}
+```
+
+---
+
+## Data-Oriented Design
+
+**Memory layout and cache behavior matter more than syntax.**
+
+### Prefer Contiguous Memory
+
+Use `Vec`, slices, and arrays. Avoid deep object graphs and pointer chasing.
+
+```rust
+// CORRECT - Contiguous memory, cache-friendly.
+struct PlayerData
+{
+	positions: Vec<Position>,
+	healths: Vec<i32>,
+	levels: Vec<u8>,
+}
+
+// WRONG - Pointer-heavy, cache-hostile.
+struct Player
+{
+	position: Box<Position>,
+	inventory: Box<Vec<Item>>,
+	stats: Box<Stats>,
+}
+```
+
+### Flat Data Structures
+
+Avoid excessive indirection and nesting.
+
+```rust
+// CORRECT - Flat, direct access.
+struct GameState
+{
+	players: Vec<Player>,
+	npcs: Vec<Npc>,
+	items: Vec<Item>,
+}
+
+// WRONG - Deep nesting.
+struct GameState
+{
+	world: Box<World>,
+}
+
+struct World
+{
+	zones: Vec<Box<Zone>>,
+}
+
+struct Zone
+{
+	entities: Vec<Box<Entity>>,
+}
+```
+
+### SoA vs AoS in Hot Paths
+
+For hot loops iterating a single field, consider Structure of Arrays.
+
+```rust
+// AoS - good for general access.
+struct Player
+{
+	x: f32,
+	y: f32,
+	health: i32,
+	level: u8,
+}
+
+let players: Vec<Player> = Vec::new();
+
+// SoA - better for hot loops accessing one field.
+struct Players
+{
+	xs: Vec<f32>,
+	ys: Vec<f32>,
+	healths: Vec<i32>,
+	levels: Vec<u8>,
+}
+
+// Hot loop only needs positions - SoA wins.
+for i in 0..players.xs.len()
+{
+	update_position(players.xs[i], players.ys[i]);
+}
+```
+
+### Avoid Heap Allocation in Loops
+
+Pre-allocate outside loops. Reuse buffers.
+
+```rust
+// WRONG - allocates every iteration.
+for file in &files
+{
+	let buffer: Vec<u8> = vec![0; 1024]; // Bad.
+	process(file, &buffer);
+}
+
+// CORRECT - allocate once.
+let mut buffer: Vec<u8> = vec![0; 1024];
+
+for file in &files
+{
+	process(file, &buffer);
+}
+```
+
+**This grounds all other rules:** Enums over traits, explicit loops, no pipelines—all serve cache-friendly, contiguous, predictable memory access.
+
+---
+
+## Naming Conventions
+
+Get the names right or the code gets rejected.
+
+### Variables and Functions
+Use **snake_case**:
+
+```rust
+let total_count: i32 = 0;
+let file_name: String = String::from("data.txt");
+
+fn process_file(path: &Path) -> Result<()>
+{
+	let buffer_size: usize = 1024;
+}
+```
+
+### Types (Structs, Enums, Traits)
+Use **PascalCase**:
+
+```rust
+struct FileProcessor
+{
+	file_path: PathBuf,
+	buffer_size: usize,
+}
+
+enum ProcessingMode
+{
+	Fast,
+	Balanced,
+	Quality,
+}
+
+trait DataProcessor
+{
+	fn process(&self, data: &[u8]) -> Result<Vec<u8>>;
+}
+```
+
+### Constants
+Use **SCREAMING_SNAKE_CASE**:
+
+```rust
+const MAX_BUFFER_SIZE: usize = 10_000_000;
+const APP_NAME: &str = "Application";
+const DEFAULT_TIMEOUT: u64 = 30;
+```
+
+---
+
+## Formatting Rules
 
 ### Indentation
-- **Use tabs for indentation** (not spaces).
-- Configure your editor to use tabs.
+- **Tabs only** - no spaces for indentation.
+- One tab per level.
+- Continuation lines get one additional tab.
 
-### Braces and Brackets Placement
-- **Place opening braces `{` and brackets `[` on a new line** for:
-  - Function definitions.
-  - Struct definitions.
-  - Enum definitions.
-  - Impl blocks.
-  - Match expressions.
-  - If/else blocks.
-  - For/while loops.
-  - Multi-line closures.
-  - Multi-line array/slice initializations.
+### Braces Placement
+Opening brace `{` on new line for:
+- Functions
+- Structs, enums, traits, impl blocks
+- If/else blocks
+- Match expressions
+- Loops (for, while)
+- Multi-line closures
+- Multi-line array/slice initializations
 
 **Examples:**
 
 ```rust
-// Function definition.
-fn process_file(source_path: &Path, target_path: &Path, options: &ProcessingOptions) -> Result<ProcessingResult>
+fn process_file(path: &Path) -> Result<ProcessingResult>
 {
 	// Function body.
 }
 
-// Struct definition.
-pub struct FileInfo
+struct FileProcessor
 {
-	pub source_path: PathBuf,
-	pub target_path: PathBuf,
+	file_path: PathBuf,
+	buffer_size: usize,
 }
 
-// Enum definition.
-enum Mode
+if condition
 {
-	Directory(Option<PathBuf>),
-	Files(Vec<PathBuf>),
+	// If body.
 }
 
-// Match expression.
-let status = match args.priority
-{
-	1..=3 => "high",
-	4..=7 => "medium",
-	_ => "low",
-};
-
-// If/else blocks.
-if args.force && args.skip
-{
-	return Err(anyhow!("Cannot use --force and --skip together"));
-}
-
-// For loops.
 for file in &files
 {
-	println!("Processing: {}", file.source_path.display());
+	// Loop body.
 }
+
+let status: &str = match priority
+{
+	1..=3 => "High",
+	4..=7 => "Medium",
+	_ => "Low",
+};
 ```
 
 **Exception - Single-line closures:**
-Single-line closures can have braces on the same line:
 
 ```rust
-.filter(|entry| entry.file_type().is_file())
-.map(|entry| entry.path().to_path_buf())
-```
-
-**Exception - Inline multi-line closures in method chains:**
-When closures span multiple lines in method chains:
-
-```rust
-.filter(|entry|
-{
-	entry.file_type().is_file() && 
-	entry.path().extension()
-		.map(|ext| ext.to_string_lossy().to_lowercase() == "txt")
-		.unwrap_or(false)
-})
+// Simple closure for sorting.
+files.sort_by(|a, b| a.len().cmp(&b.len()));
 ```
 
 ### Function Signatures
-- **Write all parameters on a single line whenever possible**.
-- Only break to multiple lines if the signature exceeds ~100-120 characters.
-- When breaking, put each parameter on its own line with proper indentation.
+**All parameters on a single line:**
 
-**Good:**
 ```rust
-pub fn process_data(source_path: &Path, target_path: &Path, validate: bool, quality: u8, mode: ProcessingMode, force: bool) -> Result<(ProcessingResult, Option<Metadata>)>
+pub fn process_data(source_path: &Path, target_path: &Path, validate: bool, quality: u8, mode: ProcessingMode) -> Result<ProcessingResult>
+{
+	// Implementation.
+}
 ```
 
-**When wrapping is necessary:**
+If it's too long, you're doing too much - refactor it.
+
+### Spacing Rules
+
+**Between functions - one blank line:**
 ```rust
-pub fn process_complex_operation(
-	source_path: &Path,
-	target_path: &Path,
-	options: &ProcessingOptions,
-	callback: impl Fn(&str) -> Result<()>
-) -> Result<ProcessingResult>
+fn function_one() -> Result<()>
+{
+	// Implementation.
+}
+
+fn function_two() -> Result<()>
+{
+	// Implementation.
+}
 ```
 
-### Line Length
-- Aim for **120 characters maximum** per line.
-- Break longer lines at logical boundaries (after commas, operators, etc.).
-- Use continuation indentation (one tab) for wrapped lines.
+**Within functions - blank lines separate logic:**
+```rust
+fn process_data() -> Result<()>
+{
+	// Section 1: Read data.
+	let data: Vec<u8> = read_file()?;
+	let size: usize = data.len();
+	
+	// Section 2: Process data.
+	let processed: ProcessedData = transform(data)?;
+	let optimized: OptimizedData = optimize(processed)?;
+	
+	// Section 3: Write results.
+	write_output(optimized)?;
+	
+	Ok(())
+}
+```
 
-### When to Break Lines
-**DO break lines when:**
-- Line exceeds 120 characters.
-- Readability is significantly improved.
-- Complex nested expressions become hard to parse.
+**Between independent control structures - blank lines:**
+```rust
+// CORRECT - blank lines separate independent checks.
+if p != usize::MAX
+{
+	key = attr.key[(p + 1)..].to_string();
+}
 
-**DON'T break lines when:**
-- A simple one-liner is perfectly readable.
-- Forcing vertical alignment makes code harder to scan.
-- Breaking adds no clarity.
+if self.params.dump_id_attributes_name
+{
+	out_attr.push_str(&format!("{}={}", key, attr.val));
+}
+```
 
-**Examples:**
+**Related if/else stays together - no blank lines:**
+```rust
+if condition1
+{
+	do_something();
+}
+else if condition2
+{
+	do_something_else();
+}
+else
+{
+	do_default();
+}
+```
+
+**Critical spacing rules:**
+- **Never more than one blank line** anywhere.
+- **No trailing spaces** at end of lines.
+- **No excessive spacing** like `if x == 0   `.
+
+---
+
+## Control Flow
+
+### When to Use If vs Match
+
+**Use if/else for 1-2 comparisons:**
+```rust
+if priority == 1
+{
+	process_high_priority();
+}
+else
+{
+	process_normal_priority();
+}
+```
+
+**Use match for 3+ comparisons:**
+```rust
+let status: &str = match priority
+{
+	1 | 2 | 3 => "High priority",
+	4 | 5 => "Medium priority",
+	_ => "Low priority",
+};
+```
+
+### If-Else Statements
+- **Always use braces** - even for single statements.
+- **Keep conditions on single line** - no wrapping.
 
 ```rust
-// Good - simple and clear.
+// Good - simple condition on single line.
+if cursor[1] == '!' && cursor[2] == '[' && cursor[3] == 'C' && cursor[4] == 'D'
+{
+	handle_cdata();
+}
+
+// Good - complex condition still on single line (even if long).
+if player.is_alive() && !player.is_stunned() && player.has_mana(50) && target.is_visible() && target.is_in_range(&player, 1200)
+{
+	cast_spell();
+}
+
+// WRONG - no braces.
+if condition
+	do_something();
+```
+
+### Match Expressions
+- **Opening brace on new line**.
+- **Each arm on its own line**.
+- **Comma after each arm** (including the last one).
+- **Always handle all cases** (use `_` for default).
+
+```rust
+let priority_desc: &str = match args.priority
+{
+	1..=3 => "High priority - immediate processing",
+	4..=7 => "Medium priority - normal processing",
+	8..=10 => "Low priority - batch processing",
+	_ => "Custom priority level",
+};
+```
+
+### Loops
+Use the appropriate loop type:
+
+```rust
+// For loops - known iteration.
+for i in 0..count
+{
+	process_item(i);
+}
+
+// For loops - iterating collections.
+for file in &files
+{
+	process_file(file);
+}
+
+// While loops - condition-based iteration.
+while !queue.is_empty()
+{
+	let item: String = queue.pop_front().unwrap();
+	process_item(&item);
+}
+```
+
+---
+
+## Type Declarations
+
+### The Rule: Controlled Type Inference
+
+Type inference is allowed when the type is obvious, forbidden when meaning is hidden.
+
+**Use inference when type is obvious:**
+```rust
+// Good - generic parameters make type explicit.
+let buffer = Vec::<u8>::new();
+let players = Vec::<Player>::with_capacity(100);
+let map = HashMap::<String, i32>::new();
+
+// Good - constructor is explicit.
+let data = String::from("hello");
+```
+
+**Do NOT use inference when type is unclear:**
+```rust
+// WRONG - type inference hides information.
 let result = calculate_value(x, y, z);
+let file = open_file(path);
+let data = get_data();
 
-// Bad - forced vertical for no benefit.
-let result = calculate_value(
-	x,
-	y,
-	z
-);
-
-// Good - long line broken for readability.
-let r = quantize_channel(pixel[0] as i16, factor);
-let g = quantize_channel(pixel[1] as i16, factor);
-let b = quantize_channel(pixel[2] as i16, factor);
-result_buffer.put_pixel(x, y, image::Rgba([r, g, b, pixel[3]]));
-
-// Bad - unreadable single line (140+ chars).
-result_buffer.put_pixel(x, y, image::Rgba([quantize_channel(pixel[0] as i16, factor), quantize_channel(pixel[1] as i16, factor), quantize_channel(pixel[2] as i16, factor), pixel[3]]));
+// CORRECT - explicit types are self-documenting.
+let result: i32 = calculate_value(x, y, z);
+let file: File = open_file(path)?;
+let data: Vec<u8> = get_data();
 ```
 
-**Principle:** Simplicity trumps symmetry. Break lines when it helps readability, not to satisfy an arbitrary pattern.
+### Struct Fields
+Always explicit:
+
+```rust
+pub struct FileProcessor
+{
+	pub source_path: PathBuf,
+	pub target_path: PathBuf,
+	pub buffer_size: usize,
+	pub mode: ProcessingMode,
+}
+```
+
+### Function Signatures
+Always explicit for parameters and return types:
+
+```rust
+pub fn process_file(source_path: &Path, target_path: &Path, validate: bool) -> Result<ProcessingResult>
+{
+	// Implementation.
+}
+```
+
+### Local Variables
+Always explicit:
+
+```rust
+let original_size: u64 = fs::metadata(source_path)?.len();
+let mut working_buffer: Vec<Vec<[i16; 4]>> = Vec::new();
+let results: Arc<Mutex<Vec<ProcessingResult>>> = Arc::new(Mutex::new(Vec::new()));
+let source_data: Vec<u8> = fs::read(source_path)?;
+```
+
+---
+
+## Borrowing and Ownership
+
+**Borrowing is fundamental to Rust.** It's not something to avoid - it's the primary way to write safe, efficient Rust code.
+
+### Use Borrowing - Don't Clone Everything
+
+Borrow when you don't need ownership. This is the Rust way.
+
+```rust
+// CORRECT - borrow when you don't need ownership.
+fn process_data(data: &[u8]) -> usize
+{
+	data.len() // Just reading, no ownership needed.
+}
+
+let data: Vec<u8> = vec![1, 2, 3];
+let length: usize = process_data(&data); // Borrow it.
+// data is still usable here!
+
+// WRONG - taking ownership when borrowing would work.
+fn process_data(data: Vec<u8>) -> usize // Takes ownership unnecessarily.
+{
+	data.len()
+}
+
+let data: Vec<u8> = vec![1, 2, 3];
+let length: usize = process_data(data); // Moved - data is gone!
+// Can't use data anymore - it was moved!
+```
+
+### When to Borrow vs Take Ownership
+
+**Borrow (&T or &mut T) when:**
+- You just need to read the data
+- You need to modify but not consume
+- You want the caller to keep using it afterward
+
+**Take ownership (T) when:**
+- The function consumes/destroys the value
+- The function stores the value long-term
+- The function transforms and returns it
+
+```rust
+// Borrow - function just reads.
+fn get_first(items: &Vec<String>) -> Option<&String>
+{
+	items.first()
+}
+
+// Borrow mutably - function modifies.
+fn add_item(items: &mut Vec<String>, item: String)
+{
+	items.push(item);
+}
+
+// Take ownership - function consumes.
+fn process_and_save(data: Vec<u8>) -> Result<()>
+{
+	save_to_disk(data)?; // data is consumed here.
+	Ok(())
+}
+```
+
+### Prefer & and &mut Over Explicit Iterator Methods
+
+Use implicit borrowing syntax in for loops:
+
+```rust
+// CORRECT - implicit borrowing.
+for item in &files
+{
+	process(item);
+}
+
+// CORRECT - implicit mutable borrowing.
+for item in &mut files
+{
+	modify(item);
+}
+
+// WRONG - explicit .iter() call.
+for item in files.iter()
+{
+	process(item);
+}
+
+// WRONG - explicit .iter_mut().
+for item in files.iter_mut()
+{
+	modify(item);
+}
+```
+
+**Principle:** Prefer borrowing. Only take ownership when you actually need it.
 
 ---
 
 ## Comments
 
-### General Comment Style
-- **Begin all comment sentences with a capital letter**.
-- **End all comment sentences with a period**.
-- Use complete sentences for clarity.
+### General Rules
+- **Start with capital letter**.
+- **End with period**.
+- **Use complete sentences**.
+- **Use `//` for single-line** comments.
+- **Use `/* */` for multi-line** comments.
 
-**Examples:**
 ```rust
 // Calculate the size reduction percentage.
-let reduction_pct = (1.0 - (new_size as f64 / original_size as f64)) * 100.0;
+let reduction_pct: f64 = (1.0 - (new_size as f64 / original_size as f64)) * 100.0;
 
-// Safety check to prevent infinite loops.
-if length > 10_000_000
-{
-	break;
-}
+/*
+ * This is a multi-line comment explaining
+ * a complex algorithm or process flow.
+ */
 ```
 
 ### Documentation Comments
-Use `///` for public items (functions, structs, modules):
+Use `///` for public items:
 
 ```rust
-/// Processes a file using a combination of techniques.
+/// Processes a file using the specified options.
 ///
 /// If validation is enabled, performs additional checks before processing.
 /// Otherwise, applies standard processing with the specified quality level.
@@ -199,499 +887,538 @@ pub fn process_file(source_path: &Path, target_path: &Path, validate: bool) -> R
 ```
 
 ### Inline Comments
-- Use `//` followed by a space for inline comments.
-- Place inline comments on the same line only when they're brief and clarify specific values.
-- When explaining code, place comments on their own line above the code.
+Only when clarifying non-obvious code:
 
-**Good:**
 ```rust
-let new_pixel =
+let new_pixel: [u8; 4] =
 [
 	quantize_channel(old_pixel[0], factor),
 	quantize_channel(old_pixel[1], factor),
 	quantize_channel(old_pixel[2], factor),
-	old_pixel[3].clamp(0, 255) as u8 // Keep alpha unchanged.
+	old_pixel[3] // Keep alpha unchanged.
 ];
-
-// Distribute error to neighboring pixels (Floyd-Steinberg pattern).
-if x + 1 < width as usize
-{
-	for c in 0..3
-	{
-		working_buffer[y][x + 1][c] += (error[c] * 7) / 16;
-	}
-}
 ```
 
-**Avoid:**
+**Don't state the obvious:**
 ```rust
-let x = 5; // Set x to 5.
+// WRONG - obvious comment.
+let x: i32 = 5; // Set x to 5.
+
+// CORRECT - only comment when adding value.
+let retry_count: i32 = 5; // Empirically determined optimal retry count.
 ```
 
 ---
 
-## Imports and Module Organization
+## Imports and Modules
 
 ### Import Ordering
-Organize imports in the following order, with blank lines between groups:
+Three groups, blank line between each:
 
 1. External crates (from dependencies)
 2. Standard library (`std::`)
 3. Local modules (`crate::`, `super::`, `self::`)
 
-**Example:**
 ```rust
 use anyhow::{anyhow, Result};
 use clap::{Parser, ArgAction};
-use rayon::prelude::*;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 mod files;
 mod processor;
-mod utils;
 
-use files::{find_files_in_dir, prepare_file_list};
-use processor::{process_file, ProcessingResult, Metadata};
-```
-
-### Module Declarations
-Place module declarations before use statements:
-
-```rust
-mod files;
-mod processor;
-
-use files::FileInfo;
+use files::find_files_in_dir;
+use processor::ProcessingResult;
 ```
 
 ---
 
-## Naming Conventions
+## Structs and Implementations
 
-### Variables and Functions
-Use **snake_case**:
-
+### Struct Definition
 ```rust
-let source_path = PathBuf::from("./file.txt");
-let total_size: u64 = 0;
-
-fn calculate_statistics(data: &[u8], width: u32, height: u32) -> f64
+pub struct FileProcessor
 {
-	// Implementation.
+	source_path: PathBuf,
+	target_path: PathBuf,
+	buffer_size: usize,
+	mode: ProcessingMode,
 }
 ```
 
-### Types (Structs, Enums, Traits)
-Use **PascalCase**:
-
+### Impl Blocks
 ```rust
-struct ProcessingResult
+impl FileProcessor
 {
-	original_size: u64,
-	new_size: u64,
-}
-
-enum ProcessingMode
-{
-	Fast,
-	Balanced,
-	Quality,
-}
-```
-
-### Constants
-Use **SCREAMING_SNAKE_CASE**:
-
-```rust
-const APP_NAME: &str = "Application";
-const APP_VERSION: &str = "1.0.0";
-const FILE_SIGNATURE: &[u8; 4] = b"FILE";
-const MAX_BUFFER_SIZE: u64 = 10_000_000;
-```
-
----
-
-## Type Annotations and Declarations
-
-### Explicit Type Annotations
-Prefer explicit type annotations for:
-- Struct fields (always).
-- Function parameters (always).
-- Return types (always).
-- Local variables when the type isn't immediately obvious.
-
-**Good:**
-```rust
-let original_size: u64 = fs::metadata(source_path)?.len();
-let mut working_buffer: Vec<Vec<[i16; 4]>> = Vec::new();
-```
-
-**When type inference is clear, annotation is optional:**
-```rust
-let results = Arc::new(Mutex::new(Vec::new())); // Type is clear from context.
-let source_data = fs::read(source_path)?; // Return type is obvious.
-```
-
-### Struct Field Initialization
-Use field init shorthand when variable names match field names:
-
-```rust
-FileInfo
-{
-	source_path, // Instead of: source_path: source_path.
-	target_path,
+	pub fn new(source: PathBuf, target: PathBuf) -> Self
+	{
+		Self
+		{
+			source_path: source,
+			target_path: target,
+			buffer_size: 1024,
+			mode: ProcessingMode::Balanced,
+		}
+	}
+	
+	pub fn process(&self) -> Result<ProcessingResult>
+	{
+		// Implementation.
+	}
+	
+	pub fn set_mode(&mut self, mode: ProcessingMode)
+	{
+		self.mode = mode;
+	}
 }
 ```
 
----
+### Field Init Shorthand
+Use when variable names match field names:
 
-## Pattern Matching
-
-### Match Expressions
-- Opening brace on a new line.
-- Each arm on its own line.
-- Comma after each arm (including the last one).
-- Use range patterns when appropriate.
-
-**Example:**
 ```rust
-let priority_desc = match args.priority
+let source_path: PathBuf = get_source();
+let target_path: PathBuf = get_target();
+
+let processor: FileProcessor = FileProcessor
 {
-	1..=3 => "High priority - immediate processing",
-	4..=7 => "Medium priority - normal processing",
-	8..=10 => "Low priority - batch processing",
-	_ => "Custom priority level",
+	source_path, // Shorthand.
+	target_path, // Shorthand.
+	buffer_size: 1024,
+	mode: ProcessingMode::Fast,
 };
-```
-
-### If Let Expressions
-Use `if let` for single pattern matching:
-
-```rust
-if let Some(ref info) = prev_info
-{
-	println!("Previously processed at priority {}", info.priority);
-}
 ```
 
 ---
 
 ## Error Handling
 
-### Result Type
-Use `anyhow::Result` for most error handling:
+### Use Result Type
+Prefer `anyhow::Result` for most error handling:
 
 ```rust
 use anyhow::{anyhow, Result};
 
-fn process_file(path: &Path) -> Result<ProcessingResult>
-{
-	let data = fs::read(path)
-		.map_err(|e| anyhow!("Failed to read file: {}", e))?;
-	
-	// Processing logic.
-	
-	Ok(ProcessingResult { /* fields */ })
-}
-```
-
-### Error Context
-Add context to errors using `.map_err()` or `.context()`:
-
-```rust
-use anyhow::Context;
-
-let data = fs::read(source_path)
-	.context("Failed to read source file")?;
-
-let parsed = parse_data(&data)
-	.map_err(|e| anyhow!("Parse error at line {}: {}", line_num, e))?;
-```
-
-### Early Returns
-Use early returns with `?` operator for cleaner code:
-
-```rust
-fn validate_and_process(path: &Path) -> Result<()>
+pub fn process_file(path: &Path) -> Result<ProcessingResult>
 {
 	if !path.exists()
 	{
-		return Err(anyhow!("File does not exist"));
+		return Err(anyhow!("File does not exist: {}", path.display()));
 	}
 	
-	let metadata = fs::metadata(path)?;
+	let metadata: Metadata = fs::metadata(path)?;
 	
 	if metadata.len() > MAX_FILE_SIZE
 	{
-		return Err(anyhow!("File too large"));
+		return Err(anyhow!("File too large: {} bytes", metadata.len()));
 	}
 	
 	// Main processing logic.
-	Ok(())
+	Ok(ProcessingResult::default())
 }
+```
+
+### Error Propagation
+Use `?` operator for error propagation:
+
+```rust
+pub fn read_and_process(path: &Path) -> Result<ProcessingResult>
+{
+	let data: Vec<u8> = fs::read(path)
+		.map_err(|e| anyhow!("Failed to read file: {}", e))?;
+	
+	let result: ProcessingResult = process_data(&data)?;
+	
+	Ok(result)
+}
+```
+
+### Meaningful Error Messages
+```rust
+// Good - context-rich error.
+fs::read(path)
+	.map_err(|e| anyhow!("Failed to read {}: {}", path.display(), e))?;
+
+// Bad - generic error.
+fs::read(path)?; // What file? Why did it fail?
 ```
 
 ---
 
-## Iterators and Functional Programming
+## String Handling
 
-### Method Chaining
-Chain iterator methods for clarity:
-
-```rust
-let valid_files: Vec<PathBuf> = read_dir(dir_path)?
-	.filter_map(Result::ok)
-	.filter(|entry| entry.file_type().is_ok())
-	.filter(|entry| entry.file_type().unwrap().is_file())
-	.map(|entry| entry.path())
-	.collect();
-```
-
-### Complex Chains
-Break complex chains with meaningful intermediate variables:
+### String vs &str
+Use the appropriate string type:
 
 ```rust
-let entries = read_dir(dir_path)?
-	.filter_map(Result::ok)
-	.collect::<Vec<_>>();
+// Owned string - when you need to modify or own the data.
+let mut owned: String = String::from("Hello");
+owned.push_str(" World");
 
-let files = entries
-	.into_iter()
-	.filter(|entry| entry.file_type().is_ok())
-	.filter(|entry| entry.file_type().unwrap().is_file())
-	.collect::<Vec<_>>();
-
-let file_info = files
-	.into_iter()
-	.map(|entry|
-	{
-		let source_path = entry.path().to_path_buf();
-		let target_path = source_path.clone();
-		
-		FileInfo
-		{
-			source_path,
-			target_path,
-		}
-	})
-	.collect::<Vec<_>>();
-```
-
-### Collect with Turbofish
-Use turbofish syntax when the target type needs to be explicit:
-
-```rust
-.collect::<Vec<_>>();
-.collect::<HashSet<_>>();
-```
-
----
-
-## Spacing and Blank Lines
-
-### Between Functions
-Use **one blank line** between function definitions:
-
-```rust
-fn function_one() -> Result<()>
+// String slice - when borrowing is sufficient.
+fn process_text(text: &str)
 {
-	// Implementation.
+	println!("{}", text);
 }
 
-fn function_two() -> Result<()>
-{
-	// Implementation.
-}
+// Convert between them.
+let owned: String = String::from("text");
+let borrowed: &str = &owned;
 ```
 
-### Within Functions
-Use blank lines to separate logical sections:
-
-```rust
-fn process_data() -> Result<()>
-{
-	// Section 1: Read data.
-	let data = read_file()?;
-	let size = data.len();
-	
-	// Section 2: Process data.
-	let processed = transform(data)?;
-	let optimized = optimize(processed)?;
-	
-	// Section 3: Write results.
-	write_output(optimized)?;
-	
-	Ok(())
-}
-```
-
-### Around Imports
-Blank line after imports:
-
-```rust
-use std::fs;
-use std::path::Path;
-
-fn main()
-{
-	// Code.
-}
-```
-
----
-
-## String Formatting
-
-### Display for Paths
-Use `.display()` when printing paths:
+### String Formatting
+Use `.display()` for paths:
 
 ```rust
 println!("Processing file: {}", source_path.display());
-println!("  - {} -> {}", file.source_path.display(), file.target_path.display());
 ```
 
-### Format Macro
 Use `format!()` for string construction:
 
 ```rust
-let message = format!("Processed: {} ({:.1}% reduction)", filename, reduction_pct);
-```
-
-### String Literals
-Use double quotes for strings:
-
-```rust
-const APP_NAME: &str = "MyApplication";
-let msg = "Processing complete.";
+let message: String = format!("Processed: {} ({:.1}% reduction)", filename, reduction_pct);
 ```
 
 ---
 
 ## Numeric Formatting
 
-### Floating Point
-Use appropriate precision for display:
+### Digit Separators
+Use underscores for digit separators:
 
 ```rust
-format!("{:.1}%", reduction_pct); // One decimal place.
-format!("{:.2} MB", size_mb); // Two decimal places.
+let large_number: i32 = 1_000_000;
+let very_large: i64 = 1_234_567_890;
+let precise: f64 = 3.141_592_653;
+
+const BUFFER_SIZE: usize = 10_000_000;
 ```
 
-### Integer Formatting
-Use underscores for large number literals:
+### Hexadecimal and Binary
+```rust
+let hex_value: u32 = 0xFF_FF_FF;
+let binary_value: u8 = 0b1111_0000;
+```
+
+---
+
+## Iterator Reference (Not Used in This Project)
+
+**These constructs exist in Rust but are intentionally avoided in this project.**
+
+Rust's iterator methods (`map`, `filter`, `fold`, `any`, `all`, `for_each`) hide control flow and allocation cost. They are documented here only for reference when reading external code.
+
+**We do not use:**
+- Chained iterator pipelines
+- `fold` / `reduce`
+- `for_each`
+- Complex iterator chains
+
+**Instead, we use explicit loops** that make control flow and allocations visible:
 
 ```rust
-const MAX_SIZE: u64 = 10_000_000;
-if length > 1_024_000
+// NOT THIS (pipeline hides control flow):
+let results: Vec<_> = files.iter()
+	.filter(|f| f.size > 1000)
+	.map(|f| process(f))
+	.collect();
+
+// THIS (explicit loop shows control flow):
+let mut results: Vec<ProcessedFile> = Vec::new();
+results.reserve(files.len());
+
+for file in files.iter()
 {
-	// Handle large file.
+	if file.size > 1000
+	{
+		let processed: ProcessedFile = process(file);
+		results.push(processed);
+	}
 }
+```
+
+**Exception:** Simple, zero-cost combinators are allowed:
+```rust
+let size: usize = data.len().max(1);
+let value: i32 = option.unwrap_or(default);
+let clamped: i32 = value.clamp(min, max);
 ```
 
 ---
 
 ## Closures
 
-### Single-Line Closures
-Keep on one line when simple:
+### Closure Syntax
+Use closures only when required by APIs (sorting, callbacks, threading).
 
 ```rust
-.filter(|entry| entry.file_type().is_file())
-.map(|x| x * 2)
+// Simple closure for API requirements.
+let add_one = |x: i32| -> i32 { x + 1 };
+let result: i32 = add_one(5);
+
+// Multi-statement closure.
+let process = |data: &[u8]| -> Result<Vec<u8>>
+{
+	let processed: Vec<u8> = transform(data)?;
+	let optimized: Vec<u8> = optimize(&processed)?;
+	Ok(optimized)
+};
 ```
 
-### Multi-Line Closures
-Use opening brace on new line:
-
+### Closure Captures
 ```rust
-.filter(|entry|
-{
-	entry.file_type().is_file() && 
-	entry.path().extension().is_some()
-})
+let threshold: i32 = 10;
 
-.map(|pixel|
+// Borrowing in closure (API requirement).
+let add_threshold = |x: i32| -> i32 { x + threshold };
+let result: i32 = add_threshold(5);
+
+// Moving ownership into closure.
+let buffer: Vec<u8> = vec![1, 2, 3];
+let processor = move ||
 {
-	let r = pixel[0];
-	let g = pixel[1];
-	let b = pixel[2];
-	calculate_brightness(r, g, b)
-})
+	process_buffer(&buffer);
+};
+```
+
+**Avoid functional patterns:** Do not use closures to replace explicit loops unless required by the API.
+
+---
+
+## Pattern Matching
+
+### Match with Enums
+```rust
+enum ProcessingMode
+{
+	Fast,
+	Balanced { quality: u8 },
+	Quality { precision: f64, passes: u32 },
+}
+
+let result: String = match mode
+{
+	ProcessingMode::Fast => "Fast mode".to_string(),
+	ProcessingMode::Balanced { quality } => format!("Balanced: q={}", quality),
+	ProcessingMode::Quality { precision, passes } => format!("Quality: p={}, passes={}", precision, passes),
+};
+```
+
+### If Let
+```rust
+// If let for single pattern.
+if let Some(value) = optional_value
+{
+	process(value);
+}
+
+// If let with guard.
+if let Some(value) = optional_value && value > 10
+{
+	process(value);
+}
+```
+
+### Destructuring
+```rust
+// Tuple destructuring.
+let (x, y): (i32, i32) = (10, 20);
+
+// Struct destructuring.
+let FileInfo { path, size } = file_info;
+
+// Enum destructuring in match.
+match result
+{
+	Ok(value) => println!("Success: {}", value),
+	Err(e) => eprintln!("Error: {}", e),
+}
 ```
 
 ---
 
 ## Specific Patterns
 
-### Arc and Mutex
-Use `Arc<Mutex<T>>` for shared mutable state across threads:
-
+### Builder Pattern
 ```rust
-let results = Arc::new(Mutex::new(Vec::new()));
-let errors = Arc::new(Mutex::new(Vec::new()));
+pub struct ProcessorBuilder
+{
+	source: Option<PathBuf>,
+	target: Option<PathBuf>,
+	buffer_size: usize,
+	mode: ProcessingMode,
+}
 
-// In parallel code.
-results.lock().unwrap().push(result);
+impl ProcessorBuilder
+{
+	pub fn new() -> Self
+	{
+		Self
+		{
+			source: None,
+			target: None,
+			buffer_size: 1024,
+			mode: ProcessingMode::Balanced,
+		}
+	}
+	
+	pub fn source(mut self, path: PathBuf) -> Self
+	{
+		self.source = Some(path);
+		self
+	}
+	
+	pub fn target(mut self, path: PathBuf) -> Self
+	{
+		self.target = Some(path);
+		self
+	}
+	
+	pub fn build(self) -> Result<FileProcessor>
+	{
+		Ok(FileProcessor
+		{
+			source_path: self.source.ok_or_else(|| anyhow!("Source required"))?,
+			target_path: self.target.ok_or_else(|| anyhow!("Target required"))?,
+			buffer_size: self.buffer_size,
+			mode: self.mode,
+		})
+	}
+}
+
+// Usage.
+let processor: FileProcessor = ProcessorBuilder::new()
+	.source(PathBuf::from("input.txt"))
+	.target(PathBuf::from("output.txt"))
+	.build()?;
 ```
 
-### Unwrapping Arc
-Use `Arc::try_unwrap()` when taking ownership back:
-
+### Newtype Pattern
 ```rust
-let results = Arc::try_unwrap(results)
-	.unwrap_or_else(|_| panic!("Failed to unwrap Arc"))
-	.into_inner()
-	.unwrap();
-```
+// Wrap primitive types for type safety.
+pub struct UserId(u64);
+pub struct ProductId(u64);
 
-### Array/Slice Initialization
-Multi-element arrays on separate lines when it improves readability:
+impl UserId
+{
+	pub fn new(id: u64) -> Self
+	{
+		Self(id)
+	}
+	
+	pub fn value(&self) -> u64
+	{
+		self.0
+	}
+}
 
-```rust
-const LOOKUP_TABLE: [[i16; 4]; 4] =
-[
-	[ 0,  8,  2, 10],
-	[12,  4, 14,  6],
-	[ 3, 11,  1,  9],
-	[15,  7, 13,  5],
-];
+// Now you can't accidentally mix up IDs.
+fn get_user(id: UserId) -> User
+{
+	// Implementation.
+}
 ```
 
 ---
 
 ## Testing Conventions
 
-### Test Functions
-- Name tests descriptively with `test_` prefix.
-- Use `assert!`, `assert_eq!`, `assert!(matches!(...))` for assertions.
-
-**Example:**
+### Unit Tests
 ```rust
-#[test]
-fn test_data_validation()
+#[cfg(test)]
+mod tests
 {
-	let mut data = vec![1, 2, 3, 4, 5];
+	use super::*;
 	
-	let result = validate_data(&data);
+	#[test]
+	fn test_data_validation()
+	{
+		let mut data: Vec<i32> = vec![1, 2, 3, 4, 5];
+		
+		let result: Result<bool> = validate_data(&data);
+		
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), true);
+	}
+	
+	#[test]
+	fn test_file_processing()
+	{
+		let temp_file: PathBuf = create_temp_file();
+		
+		let result: Result<ProcessingResult> = process_file(&temp_file);
+		
+		assert!(result.is_ok());
+		assert!(result.unwrap().reduction_percent > 0.0);
+	}
+}
+```
+
+### Integration Tests
+Create in `tests/` directory:
+
+```rust
+// tests/integration_test.rs
+use my_crate::FileProcessor;
+use std::path::PathBuf;
+
+#[test]
+fn test_end_to_end_processing()
+{
+	let source: PathBuf = PathBuf::from("test_data/input.txt");
+	let target: PathBuf = PathBuf::from("test_data/output.txt");
+	
+	let processor: FileProcessor = FileProcessor::new(source, target);
+	let result: Result<ProcessingResult> = processor.process();
 	
 	assert!(result.is_ok());
-	assert_eq!(result.unwrap(), true);
+}
+```
+
+---
+
+## Performance Considerations
+
+### Avoid Cloning
+```rust
+// Bad - unnecessary cloning.
+fn process(data: Vec<u8>) -> Vec<u8> // Takes ownership.
+{
+	// Forces caller to clone.
 }
 
-#[test]
-fn test_mode_selection()
+// Good - borrow when possible.
+fn process(data: &[u8]) -> Vec<u8> // Borrows.
 {
-	let config = Configuration
-	{
-		priority: 5,
-		quality: 85,
-		mode: ProcessingMode::Balanced,
-	};
-	
-	assert!(matches!(select_mode(&config), ProcessingMode::Balanced));
+	// No cloning needed.
+}
+```
+
+### Use References
+```rust
+// Good - pass by reference.
+fn process_file(path: &Path) -> Result<ProcessingResult>
+{
+	// Borrow the path.
+}
+
+// Avoid - pass by value when unnecessary.
+fn process_file(path: PathBuf) -> Result<ProcessingResult>
+{
+	// Takes ownership - caller must give up the PathBuf.
+}
+```
+
+### Reserve Capacity
+```rust
+let mut results: Vec<ProcessingResult> = Vec::new();
+results.reserve(1000); // Pre-allocate.
+
+for file in &files
+{
+	results.push(process_file(file)?);
 }
 ```
 
@@ -699,60 +1426,136 @@ fn test_mode_selection()
 
 ## Anti-Patterns to Avoid
 
-### Don't Use Unnecessary Cloning
-Prefer borrowing over cloning when possible:
-
-**Avoid:**
+### ❌ Don't Omit Type Annotations When Type Is Unclear
 ```rust
-fn process(data: Vec<u8>) -> Vec<u8> // Takes ownership, forces cloning at call site.
+// WRONG - unclear return type.
+let result = calculate_value(x, y, z);
+
+// CORRECT - explicit type.
+let result: i32 = calculate_value(x, y, z);
+
+// ALLOWED - obvious from turbofish.
+let buffer = Vec::<u8>::new();
 ```
 
-**Better:**
+### ❌ Don't Declare Multiple Variables on Same Line
 ```rust
-fn process(data: &[u8]) -> Vec<u8> // Borrows, no cloning needed.
+// WRONG - hard to see types.
+let (a, b) = (0, 0);
+let x = 1; let y = 2; let z;
+
+// CORRECT - one per line.
+let a: i32 = 0;
+let b: i32 = 0;
+let x: i32 = 1;
+let y: i32 = 2;
+let z: i32 = 0;
 ```
 
-### Don't Use `unwrap()` in Production Code
-Use proper error handling instead:
-
-**Avoid:**
+**Exception:** Tuple destructuring for semantically related values:
 ```rust
-let data = fs::read(path).unwrap(); // Panics on error.
+let (width, height): (u32, u32) = (800, 600); // OK - paired values.
 ```
 
-**Better:**
+### ❌ Don't Over-Engineer - Avoid Single-Use Code
 ```rust
-let data = fs::read(path)
+// WRONG - constant used only once.
+const BUFFER_SIZE: usize = 1024;
+let buffer: Vec<u8> = vec![0; BUFFER_SIZE];
+
+// CORRECT - inline it.
+let buffer: Vec<u8> = vec![0; 1024];
+
+// WRONG - helper function called only once.
+fn print_separator()
+{
+	println!("---");
+}
+
+// CORRECT - inline it.
+println!("---");
+```
+
+**Exception:** Create abstractions when used multiple times, improves clarity significantly, or likely to change.
+
+### ❌ Don't Use unwrap() in Production Code
+```rust
+// WRONG - panics on error.
+let data: Vec<u8> = fs::read(path).unwrap();
+
+// CORRECT - handle errors.
+let data: Vec<u8> = fs::read(path)
 	.map_err(|e| anyhow!("Failed to read file: {}", e))?;
 ```
 
-### Don't Write Overly Nested Code
-Extract complex logic into separate functions:
-
-**Avoid:**
+### ❌ Don't Clone Unnecessarily
 ```rust
+// WRONG - unnecessary cloning.
+fn process(data: Vec<u8>) -> Vec<u8> // Takes ownership.
+{
+	// Forces caller to clone.
+}
+
+// CORRECT - borrow when possible.
+fn process(data: &[u8]) -> Vec<u8> // Borrows.
+{
+	// No cloning needed.
+}
+```
+
+### ❌ Don't Use Iterator Pipelines (Use Explicit Loops)
+```rust
+// WRONG - hides control flow, allocations, and cost.
+let results: Vec<_> = files
+	.iter()
+	.filter(|f| f.size > 1000)
+	.map(|f| process(f))
+	.collect();
+
+// CORRECT - explicit control flow and allocations.
+let mut results: Vec<ProcessedFile> = Vec::new();
+results.reserve(files.len());
+
+for file in files.iter()
+{
+	if file.size > 1000
+	{
+		let processed: ProcessedFile = process(file);
+		results.push(processed);
+	}
+}
+```
+
+**Exception:** Simple zero-cost combinators like `.max()`, `.unwrap_or()`, `.clamp()` are allowed.
+
+### ❌ Don't Write Deeply Nested Code
+```rust
+// WRONG - deeply nested.
 if condition1
 {
 	if condition2
 	{
 		if condition3
 		{
-			// Deeply nested logic.
+			// Too deep.
 		}
 	}
 }
-```
 
-**Better:**
-```rust
+// CORRECT - early returns.
 if !condition1
 {
-	return early();
+	return Err(anyhow!("Condition 1 failed"));
 }
 
 if !condition2
 {
-	return early();
+	return Err(anyhow!("Condition 2 failed"));
+}
+
+if !condition3
+{
+	return Err(anyhow!("Condition 3 failed"));
 }
 
 // Main logic at top level.
@@ -762,29 +1565,45 @@ if !condition2
 
 ## Quick Reference Checklist
 
-When writing or reviewing code, ensure:
+Before submitting code, verify:
 
-- [ ] Using tabs for indentation.
-- [ ] Opening braces/brackets on new lines for functions, structs, enums, blocks, arrays.
-- [ ] Function parameters on single line (unless very long).
-- [ ] Comments start with capital letter and end with period.
-- [ ] Using snake_case for variables/functions.
-- [ ] Using PascalCase for types.
-- [ ] Using SCREAMING_SNAKE_CASE for constants.
-- [ ] Explicit type annotations on struct fields and function signatures.
-- [ ] Proper error handling with `anyhow::Result`.
-- [ ] Meaningful error messages with context.
-- [ ] One blank line between functions.
-- [ ] Blank lines to separate logical sections.
-- [ ] Using `.display()` for path formatting.
-- [ ] Import organization: external -> std -> local.
+- [ ] **Controlled type inference** - only when type is obvious from RHS
+- [ ] **Explicit types when unclear** - I can see types without jumping to definitions
+- [ ] **Enums over traits** - for known variants and hot paths
+- [ ] **Pattern matching over if chains** - use match for 3+ cases
+- [ ] **No iterator pipelines** - use explicit loops for traversal
+- [ ] **Data-oriented design** - contiguous memory, flat structures, no deep nesting
+- [ ] **Single-line code** - all control flow, conditions, signatures on single lines (no wrapping)
+- [ ] **Allman braces** - opening `{` on new line
+- [ ] **Tabs for indentation** - not spaces
+- [ ] **Complete sentences in comments** - capital letter, period
+- [ ] **snake_case** for variables/functions
+- [ ] **PascalCase** for types (structs/enums/traits)
+- [ ] **SCREAMING_SNAKE_CASE** for constants
+- [ ] **One blank line** between functions
+- [ ] **Never more than one blank line** anywhere
+- [ ] **No trailing spaces**
+- [ ] **One variable per line** - no `let (a, b) = (0, 0);` unless semantically paired
+- [ ] **Proper error handling** with `anyhow::Result`
+- [ ] **No unwrap()** in production code
+- [ ] **Borrow instead of clone** when possible
+- [ ] **Use `&` and `&mut`** instead of `.iter()` and `.iter_mut()` in for loops
+- [ ] **Import order** correct (external, std, local)
+- [ ] **.display()** for path formatting
 
 ---
 
 ## Summary
 
-The coding style emphasizes:
-1. **Readability** - Code should be self-documenting and easy to understand.
-2. **Consistency** - Use the same patterns throughout the codebase.
-3. **Explicitness** - Prefer explicit types and error handling.
-4. **Maintainability** - Write code that's easy to modify and debug.
+Remember these core principles:
+
+1. **Systems, Not Functional** - Explicit loops over pipelines. Enums over traits. No hidden control flow.
+2. **Data-Oriented** - Contiguous memory, flat structures, cache-friendly access patterns.
+3. **Controlled Type Inference** - Use inference only when type is obvious from RHS.
+4. **Pattern Matching** - Use match for 3+ cases, not if/else chains.
+5. **Single-Line Code** - All control flow, conditions, signatures on single lines. Wrapping hides complexity instead of reducing it.
+6. **Allman Braces** - Opening braces on new lines always.
+7. **Complete Sentences** - Comments are documentation.
+8. **Don't Over-Engineer** - YAGNI (You Ain't Gonna Need It).
+9. **Borrow, Don't Clone** - Use references when possible.
+10. **Handle Errors** - Use Result, not unwrap().

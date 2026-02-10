@@ -71,12 +71,12 @@ pub struct MinificationInfo
 pub fn minify_png(source_path: &Path, target_path: &Path, lossless_only: bool, quality: u8, dithering_mode: DitheringMode, smooth_radius: f32, denoise: bool, force: bool) -> Result<(ProcessingResult, Option<MinificationInfo>)>
 {
 	// Get the original file size.
-	let original_size = fs::metadata(source_path)
+	let original_size: u64 = fs::metadata(source_path)
 		.map_err(|e| anyhow!("Failed to get file metadata: {}", e))?
 		.len();
 	
 	// Read the source file into memory.
-	let source_data = fs::read(source_path)
+	let source_data: Vec<u8> = fs::read(source_path)
 		.map_err(|e| anyhow!("Failed to read source file: {}", e))?;
 	
 	// Check if this file has already been minified by this tool (unless force is true).
@@ -112,7 +112,7 @@ pub fn minify_png(source_path: &Path, target_path: &Path, lossless_only: bool, q
 	};
 	
 	// Get size from in-memory buffer (no disk I/O needed!).
-	let new_size = minified_data.len() as u64;
+	let new_size: u64 = minified_data.len() as u64;
 	
 	// Only save the result if it's smaller than the original.
 	if new_size < original_size
@@ -165,7 +165,7 @@ fn is_already_minified(png_data: &[u8]) -> Result<(bool, Option<MinificationInfo
 	while pos + 12 <= png_data.len()
 	{
 		// Read chunk length (4 bytes, big-endian).
-		let length = u32::from_be_bytes([png_data[pos], png_data[pos + 1], png_data[pos + 2], png_data[pos + 3]]) as usize;
+		let length: usize = u32::from_be_bytes([png_data[pos], png_data[pos + 1], png_data[pos + 2], png_data[pos + 3]]) as usize;
 		
 		// Read chunk type (4 bytes).
 		let chunk_type = &png_data[pos + 4..pos + 8];
@@ -183,7 +183,7 @@ fn is_already_minified(png_data: &[u8]) -> Result<(bool, Option<MinificationInfo
 				if chunk_data.starts_with(MARKER_STRING.as_bytes())
 				{
 					// Parse the minification info from the marker.
-					let info = parse_minification_info(chunk_data);
+					let info: Option<MinificationInfo> = parse_minification_info(chunk_data);
 					return Ok((true, info));
 				}
 			}
@@ -220,7 +220,7 @@ fn parse_minification_info(marker_data: &[u8]) -> Option<MinificationInfo>
 	// Parse key=value pairs.
 	for pair in data_part.split(',')
 	{
-		let parts = pair.split('=').collect::<Vec<_>>();
+		let parts: Vec<&str> = pair.split('=').collect();
 		if parts.len() == 2
 		{
 			match parts[0]
@@ -289,7 +289,7 @@ fn apply_quality_lossless_minification(png_data: &[u8]) -> Result<Vec<u8>>
 	options.deflater = Deflater::Zopfli(Default::default());
 	
 	// Apply oxipng optimization.
-	let optimized = optimize_from_memory(png_data, &options)
+	let optimized: Vec<u8> = optimize_from_memory(png_data, &options)
 		.map_err(|e| anyhow!("Failed to optimize PNG: {}", e))?;
 	
 	Ok(optimized)
@@ -303,7 +303,7 @@ fn apply_quality_lossless_minification(png_data: &[u8]) -> Result<Vec<u8>>
 fn apply_quality_lossy_minification(png_data: &[u8], quality: u8, dithering_mode: DitheringMode, smooth_radius: f32, denoise: bool) -> Result<(Vec<u8>, DitheringMode)>
 {
 	// Validate it's a valid PNG and load it.
-	let img = image::load_from_memory(png_data)
+	let img: image::DynamicImage = image::load_from_memory(png_data)
 		.map_err(|e| anyhow!("Failed to decode PNG: {}", e))?;
 	
 	// Determine effective dithering mode (resolve Auto).
@@ -314,7 +314,7 @@ fn apply_quality_lossy_minification(png_data: &[u8], quality: u8, dithering_mode
 	};
 	
 	// Apply color quantization with specified quality and dithering mode.
-	let quantized = apply_quantization(&img, quality, effective_dithering, smooth_radius, denoise)?;
+	let quantized: Vec<u8> = apply_quantization(&img, quality, effective_dithering, smooth_radius, denoise)?;
 	
 	// Apply aggressive lossless minification to the quantized data.
 	let mut options = OxiOptions::default();
@@ -326,7 +326,7 @@ fn apply_quality_lossy_minification(png_data: &[u8], quality: u8, dithering_mode
 	options.color_type_reduction = true;
 	options.palette_reduction = true;
 	
-	let minified = optimize_from_memory(&quantized, &options)
+	let minified: Vec<u8> = optimize_from_memory(&quantized, &options)
 		.map_err(|e| anyhow!("Failed to optimize quantized PNG: {}", e))?;
 	
 	Ok((minified, effective_dithering))
@@ -347,7 +347,7 @@ fn add_minification_marker_with_info(png_data: &[u8], lossless: bool, quality: u
 	
 	while pos + 12 <= png_data.len()
 	{
-		let length = u32::from_be_bytes([png_data[pos], png_data[pos + 1], png_data[pos + 2], png_data[pos + 3]]) as usize;
+		let length: usize = u32::from_be_bytes([png_data[pos], png_data[pos + 1], png_data[pos + 2], png_data[pos + 3]]) as usize;
 		
 		let chunk_type = &png_data[pos + 4..pos + 8];
 		
@@ -383,9 +383,9 @@ fn add_minification_marker_with_info(png_data: &[u8], lossless: bool, quality: u
 		format!("quality={},dithering={},lossless=false,reduction={:.1},timestamp={}", quality, dithering_name, reduction_pct, timestamp)
 	};
 	
-	let marker_text = format!("{}{}", MARKER_STRING, info_str);
+	let marker_text: String = format!("{}{}", MARKER_STRING, info_str);
 	let marker_bytes = marker_text.as_bytes();
-	let marker_length = marker_bytes.len() as u32;
+	let marker_length: u32 = marker_bytes.len() as u32;
 	
 	// Calculate CRC for the chunk.
 	let mut crc_data = Vec::new();
@@ -394,7 +394,7 @@ fn add_minification_marker_with_info(png_data: &[u8], lossless: bool, quality: u
 	let crc = crc_utils::hash(&crc_data);
 	
 	// Build new PNG with marker chunk inserted before IEND.
-	let mut result = Vec::with_capacity(png_data.len() + 12 + marker_bytes.len());
+	let mut result: Vec<u8> = Vec::with_capacity(png_data.len() + 12 + marker_bytes.len());
 	result.extend_from_slice(&png_data[..iend_pos]);
 	result.extend_from_slice(&marker_length.to_be_bytes());
 	result.extend_from_slice(b"tEXt");
@@ -532,7 +532,7 @@ fn apply_no_dithering(rgba: &image::RgbaImage, width: u32, height: u32, factor: 
 	let mut quantized_img = image::RgbaImage::new(width, height);
 	
 	// Process rows in parallel for better performance.
-	let rows: Vec<_> = (0..height).into_par_iter().map(|y|
+	let rows: Vec<(u32, Vec<(u32, image::Rgba<u8>)>)> = (0..height).into_par_iter().map(|y|
 	{
 		let mut row_pixels = Vec::with_capacity(width as usize);
 		
@@ -566,12 +566,11 @@ fn apply_floyd_steinberg_dithering(rgba: &image::RgbaImage, width: u32, height: 
 {
 	// Create a working buffer with i16 to handle error diffusion (can be negative).
 	let initial_buffer = vec![vec![[0i16; 4]; width as usize]; height as usize];
-	let mut working_buffer: Vec<Vec<[i16; 4]>> = rgba.enumerate_pixels()
-		.fold(initial_buffer, |mut buf, (x, y, pixel)|
-		{
-			buf[y as usize][x as usize] = [pixel[0] as i16, pixel[1] as i16, pixel[2] as i16, pixel[3] as i16];
-			buf
-		});
+	let mut working_buffer: Vec<Vec<[i16; 4]>> = initial_buffer;
+	for (x, y, pixel) in rgba.enumerate_pixels()
+	{
+		working_buffer[y as usize][x as usize] = [pixel[0] as i16, pixel[1] as i16, pixel[2] as i16, pixel[3] as i16];
+	}
 	
 	// Apply Floyd-Steinberg dithering with serpentine scanning and reduced error.
 	// Serpentine: alternating left-to-right and right-to-left scan eliminates "worms".
@@ -583,13 +582,20 @@ fn apply_floyd_steinberg_dithering(rgba: &image::RgbaImage, width: u32, height: 
 	{
 		// Serpentine: even rows go left-to-right, odd rows go right-to-left.
 		let is_forward = y % 2 == 0;
-		let x_range: Vec<usize> = if is_forward
+		let mut x_range: Vec<usize> = Vec::with_capacity(width as usize);
+		if is_forward
 		{
-			(0..width as usize).collect()
+			for x in 0..width as usize
+			{
+				x_range.push(x);
+			}
 		}
 		else
 		{
-			(0..width as usize).rev().collect()
+			for x in (0..width as usize).rev()
+			{
+				x_range.push(x);
+			}
 		};
 		
 		for x in x_range
@@ -751,7 +757,7 @@ fn apply_ordered_dithering(rgba: &image::RgbaImage, width: u32, height: u32, fac
 	let mut result = image::RgbaImage::new(width, height);
 	
 	// Process rows in parallel.
-	let rows: Vec<_> = (0..height).into_par_iter().map(|y|
+	let rows: Vec<(u32, Vec<(u32, image::Rgba<u8>)>)> = (0..height).into_par_iter().map(|y|
 	{
 		let mut row_pixels = Vec::with_capacity(width as usize);
 		

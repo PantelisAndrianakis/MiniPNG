@@ -40,15 +40,15 @@ static CRC_TABLE: [u32; 256] =
 ];
 
 /// Calculates the CRC32 checksum of a byte slice.
-/// 
+///
 /// This is a drop-in replacement for crc32fast::hash.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `data` - The data to calculate the checksum for.
-/// 
+///
 /// # Returns
-/// 
+///
 /// The CRC32 checksum as a u32.
 pub fn hash(data: &[u8]) -> u32
 {

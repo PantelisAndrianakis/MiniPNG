@@ -12,9 +12,7 @@ pub struct PngFile
 }
 
 /// Recursively find all files in a directory that match a predicate.
-pub fn find_files_recursive<F>(directory: &Path, file_predicate: F) -> Result<Vec<PathBuf>>
-where
-	F: Fn(&Path) -> bool + Copy,
+pub fn find_files_recursive<F>(directory: &Path, file_predicate: F) -> Result<Vec<PathBuf>> where F: Fn(&Path) -> bool + Copy
 {
 	let mut result: Vec<PathBuf> = Vec::new();
 	collect_files_recursive(directory, &mut result, file_predicate)?;
@@ -28,19 +26,17 @@ where
 }
 
 /// Internal helper function to collect files recursively.
-fn collect_files_recursive<F>(dir: &Path, files: &mut Vec<PathBuf>, file_predicate: F) -> Result<()>
-where
-	F: Fn(&Path) -> bool + Copy,
+fn collect_files_recursive<F>(dir: &Path, files: &mut Vec<PathBuf>, file_predicate: F) -> Result<()> where F: Fn(&Path) -> bool + Copy
 {
 	if !dir.is_dir()
 	{
 		return Err(anyhow!("Not a directory: {}", dir.display()));
 	}
-
+	
 	for entry in std::fs::read_dir(dir)?
 	{
-		let entry = entry?;
-		let path: PathBuf = entry.path();
+		let entry_result: std::fs::DirEntry = entry?;
+		let path: PathBuf = entry_result.path();
 		
 		if path.is_dir()
 		{
@@ -68,35 +64,48 @@ pub fn find_png_files_in_dir(dir: Option<&Path>, _inplace: bool) -> Result<Vec<P
 	let png_files: Vec<PathBuf> = find_files_recursive(directory, is_png_file)?;
 	
 	// Convert to PngFile structures.
-	let result: Vec<PngFile> = png_files.into_iter()
-		.map(|path| PngFile
+	let mut result: Vec<PngFile> = Vec::new();
+	result.reserve(png_files.len());
+	
+	for path in png_files
+	{
+		result.push(PngFile
 		{
 			source_path: path.clone(),
 			target_path: path, // For in-place operations, target is the same as source.
-		})
-		.collect();
-		
+		});
+	}
+	
 	Ok(result)
 }
 
 /// Prepare a list of specific PNG files for processing.
 pub fn prepare_specific_png_files(files: &[PathBuf], _inplace: bool) -> Vec<PngFile>
 {
-	files.iter()
-		.map(|path| PngFile
+	let mut result: Vec<PngFile> = Vec::new();
+	result.reserve(files.len());
+	
+	for path in files
+	{
+		result.push(PngFile
 		{
 			source_path: path.clone(),
 			target_path: path.clone(), // For in-place operations, target is the same as source.
-		})
-		.collect()
+		});
+	}
+	
+	result
 }
 
 /// Checks if a file is a PNG file by its extension.
 pub fn is_png_file(path: &Path) -> bool
 {
-	path.extension()
-		.map(|ext| ext.to_string_lossy().to_lowercase() == "png")
-		.unwrap_or(false)
+	if let Some(ext) = path.extension()
+	{
+		let ext_lowercase: String = ext.to_string_lossy().to_lowercase();
+		return ext_lowercase == "png";
+	}
+	false
 }
 
 /// Process a single PNG file.
